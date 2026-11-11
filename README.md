@@ -103,21 +103,26 @@ read the rules over MCP, or they generate right on
 artist, every time**. Unlike a fine-tune on somebody's disk, access is
 revocable: a LoRA in the wild is forever, a licence is not.
 
-## Run your own, in one command
+## Run this fork locally
+
+Run these commands from the checkout of this fork.
 
 ```bash
-git clone https://github.com/egorfedorov/mozg.git && cd mozg
-cp .env.selfhost.example .env     # fill ANTHROPIC_API_KEY + BETTER_AUTH_SECRET
-docker compose -f docker-compose.selfhost.yml up
+cp .env.selfhost.example .env     # fill MOZG_ADMIN_EMAIL, MOZG_ADMIN_PASSWORD + BETTER_AUTH_SECRET
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 Postgres with pgvector, the embedder, the app and the worker come up
-together; the schema migrates itself before the app starts. Open
-**http://localhost:3300**, create an account, paste a docs URL.
+together; the app waits for Postgres, applies the schema and provisions the
+administrator from `.env`, then serves. Open **http://localhost:3300** and
+sign in with `MOZG_ADMIN_EMAIL` / `MOZG_ADMIN_PASSWORD` — no model key is
+needed for that. After editing `.env`, recreate the app with
+`docker compose -f docker-compose.selfhost.yml up -d` so it picks the new
+values up (`restart` keeps the old environment).
 
-First boot downloads ~2.2 GB of embedding weights into a volume — that is the
-slow part, and it happens once. Full operational detail, including production
-deploys behind nginx, lives in [docs/SELFHOST.md](docs/SELFHOST.md).
+On first boot the embedder downloads about 2.2 GB of weights into a persistent
+volume. The app can serve requests while the download runs. The remaining
+work is tracked in the [SVOD plan](docs/SVOD_PLAN.md).
 
 ## Cloud, or your own metal
 
@@ -128,7 +133,7 @@ deploys behind nginx, lives in [docs/SELFHOST.md](docs/SELFHOST.md).
 | Build brains | free trial brain, then plans **or bring your own API key** | your keys, no limits |
 | Marketplace | outside authors sell, 95% to them | n/a |
 | Style generation | 25¢/image, 10¢ to the artist | needs an image-capable API key |
-| Ops | ours | [`docs/SELFHOST.md`](docs/SELFHOST.md) |
+| Ops | ours | [Local setup](#run-this-fork-locally) |
 
 The deal is honest: building brains spends model tokens. On the cloud you
 either pay a plan (we spend), set your own API key in settings (you spend),

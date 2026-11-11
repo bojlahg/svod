@@ -16,7 +16,10 @@ const defaulted = <T extends z.ZodTypeAny>(schema: T) =>
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
 
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  // Blank in .env means unset (compose ships ANTHROPIC_API_KEY= empty) —
+  // the app boots and serves without a model key; extraction and exams
+  // refuse with a clear error only when actually used.
+  ANTHROPIC_API_KEY: defaulted(z.string().min(1).optional()),
   // Any Anthropic-compatible endpoint. Lets the app run through a reseller
   // (apimart, OpenRouter, …) when a card for console.anthropic.com is not an
   // option — the request and response shapes are identical, so nothing else
@@ -65,7 +68,9 @@ const schema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
 
-  BETTER_AUTH_SECRET: z.string().min(16).optional(),
+  // Blank in .env means unset, so the self-host bootstrapper can reject it
+  // with its own message (generate with `openssl rand -hex 32`).
+  BETTER_AUTH_SECRET: defaulted(z.string().min(16).optional()),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:3300"),
   // Shared secret for repository push callbacks (/api/github/push). One
   // platform-wide value the owner also pastes into their repo's webhook
@@ -141,6 +146,13 @@ const schema = z.object({
   // an admin surface that defaults to open is a breach waiting for its first
   // sign-up.
   ADMIN_EMAILS: z.string().default(""),
+
+  // SVOD self-host administrator. When set, the app provisions this account on
+  // startup and treats it as an admin alongside ADMIN_EMAILS. Empty means
+  // unset, so legacy deploys that only use ADMIN_EMAILS keep working.
+  // Trimmed with the same zod email rule the bootstrapper validates with.
+  MOZG_ADMIN_EMAIL: defaulted(z.string().trim().email().optional()),
+  MOZG_ADMIN_PASSWORD: defaulted(z.string().min(1).optional()),
 
   // Where user chat messages and ops alerts (deploy/healthwatch.sh) go. The
   // default keeps existing deploys mailing the operator as before.

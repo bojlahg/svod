@@ -11,8 +11,10 @@ import type { Plan, Visibility } from "@/db/types";
  * substitute for a guard on the action it renders.
  */
 
+const extraAdmins = env.MOZG_ADMIN_EMAIL ? [env.MOZG_ADMIN_EMAIL] : [];
+
 const ADMINS = new Set(
-  env.ADMIN_EMAILS.split(",")
+  [...env.ADMIN_EMAILS.split(","), ...extraAdmins]
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
 );

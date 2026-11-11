@@ -63,20 +63,25 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libvips42 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/dist ./dist
-COPY package.json next.config.ts ./
-# dist/migrate.mjs resolves the migration files relative to itself
-# (../src/db/migrations) — only that folder is needed, not the whole src tree.
-COPY src/db/migrations ./src/db/migrations
-# /roadmap renders docs/ROADMAP.md at request time so the page and the repository
-# cannot drift. Without this line the page ships and falls back to "could not read
-# it", which is exactly the kind of half-working thing it exists to avoid.
-COPY docs/ROADMAP.md ./docs/ROADMAP.md
+# Runtime copies arrive already owned by the non-root user (numeric id — the
+# user is created just below), so no recursive chown of /app is needed. The
+# old `chown -R /app` walked every node_modules file and took minutes on
+# Docker Desktop; --chown writes the same ownership at copy time. Only /app
+# itself still needs a (non-recursive) chown after useradd.
+COPY --chown=10001:10001 --from=prod-deps /app/node_modules ./node_modules
+COPY --chown=10001:10001 --from=build /app/.next ./.next
+COPY --chown=10001:10001 --from=build /app/public ./public
+COPY --chown=10001:10001 --from=build /app/dist ./dist
+COPY --chown=10001:10001 package.json next.config.ts ./
+# dist/migrate.mjs (and dist/selfhost-start.mjs) resolve the migration files
+# relative to themselves (../src/db/migrations) — only that folder is needed,
+# not the whole src tree.
+COPY --chown=10001:10001 src/db/migrations ./src/db/migrations
+# /roadmap reads docs/ROADMAP.md at request time when present and renders its
+# fallback otherwise; the file is not copied on purpose (see the route) so a
+# deleted doc cannot break the image build.
 
-RUN useradd -m -u 10001 mozg && chown -R mozg:mozg /app
+RUN useradd -m -u 10001 mozg && chown mozg:mozg /app
 
 # The storage volume mounts here. Creating it in the image with the right owner
 # is what makes a fresh install work: Docker copies this ownership into a new

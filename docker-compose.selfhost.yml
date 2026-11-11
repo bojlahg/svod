@@ -3,16 +3,21 @@
 #   cp .env.selfhost.example .env && docker compose -f docker-compose.selfhost.yml up
 #
 # Everything comes up together — Postgres with pgvector, the embedder, the
-# app and the worker — migrations included. The only thing you must edit is
-# ANTHROPIC_API_KEY (or an OpenAI-compatible one; see .env.selfhost.example).
+# app and the worker. The app waits for Postgres, applies the SQL migrations
+# in place, provisions the administrator from MOZG_ADMIN_EMAIL /
+# MOZG_ADMIN_PASSWORD, then serves. No model key is needed to boot, read or
+# search; extraction and exams spend a key only when you use them
+# (see .env.selfhost.example).
 #
 # Differences from docker-compose.prod.yml, deliberately: the app is exposed
-# on 3300 directly (no nginx in front, so you can open it), the database
-# password has a working default, and a one-shot `migrate` service runs the
-# schema before the app starts, so nothing is left for you to remember.
+# on 3300 directly (no nginx in front, so you can open it) and the database
+# password has a working default. There is no one-shot `migrate` service:
+# the app migrates itself before serving, and the worker starts after the
+# app is ready.
 #
 # First boot downloads ~2.2 GB of embedding weights into a volume. That is
-# the slow part; every later start is seconds.
+# the slow part; the app does not wait for it — pages serve while the model
+# loads, and search falls back to full text until it answers.
 
 services:
   db:
@@ -43,28 +48,17 @@ services:
       # Weights download on first boot; do not call it dead meanwhile.
       start_period: 1200s
 
-  # One-shot: identity tables and the app schema, then exit. The app waits for
-  # this to complete, so a fresh clone never meets a half-built database.
-  migrate:
-    build:
-      context: .
-      args:
-        GIT_SHA: ${GIT_SHA:-selfhost}
-    command: ["node", "dist/migrate.mjs"]
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://mozg:${POSTGRES_PASSWORD:-mozg}@db:5432/mozg
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-
   app:
     build:
       context: .
       args:
         GIT_SHA: ${GIT_SHA:-selfhost}
     restart: unless-stopped
+    # Startup order lives here: the bootstrapper waits for Postgres,
+    # migrates and provisions the admin, then execs Next in its place —
+    # migration errors exit nonzero before anything serves, and Docker's
+    # signals reach the Next process directly. See scripts/selfhost-start.ts.
+    command: ["sh", "-c", "node dist/selfhost-start.mjs && exec node node_modules/next/dist/bin/next start -p 3300"]
     ports:
       - "${MOZG_PORT:-3300}:3300"
     env_file: .env
@@ -77,14 +71,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3300/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      # Readiness, not model health: /api/ready is 200 once migrations and
+      # the admin bootstrap have finished and Postgres answers. Checking the
+      # embedder or the queue here would keep the worker waiting on the very
+      # jobs it exists to clear.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3300/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
-      retries: 6
-      start_period: 30s
+      retries: 12
+      start_period: 60s
 
   worker:
     build:
@@ -101,8 +97,10 @@ services:
     volumes:
       - storage:/data/storage
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
 
 volumes:
   pgdata:

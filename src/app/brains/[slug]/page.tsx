@@ -33,6 +33,7 @@ import {
 } from "./svod-forms";
 import { rejectNote } from "./review-actions";
 import ProposalReviewForm from "./proposal-review-form";
+import { SvodImportForm } from "./svod-transfer";
 
 export const dynamic = "force-dynamic";
 
@@ -367,6 +368,16 @@ export default async function SvodWorkspacePage({
           <SvodAutoIndexForm brainId={brain.id} initial={indexStatus.autoIndex} />
         </div>
       ) : null}
+
+      <div className="svod-index-controls" style={{ display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "center", marginBottom: ".6rem" }}>
+        <a className="svod-btn-ghost" href={`/api/brains/${brain.id}/svod-export?format=full`}>
+          {t("Export full archive")}
+        </a>
+        <a className="svod-btn-ghost" href={`/api/brains/${brain.id}/svod-export?format=markdown`}>
+          {t("Export Markdown")}
+        </a>
+      </div>
+      {canEdit ? <SvodImportForm brainId={brain.id} /> : null}
 
       <div className="svod-searchrow">
         <form method="get" action={baseHref} role="search" style={{ display: "flex", gap: ".5rem", flex: 1, minWidth: 0 }}>

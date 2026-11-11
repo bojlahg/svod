@@ -20,6 +20,10 @@ export const QUEUES = {
   summary: "summary",
   refresh: "refresh",
   generate: "generate",
+  /** SVOD stage 5 section embeddings. NOT a learning queue: runs without a
+   *  paid model key and is never held by holdLearningQueues. pg-boss only
+   *  wakes the worker; svod_embed_outbox is the source of truth. */
+  svodIndex: "svod-index",
 } as const;
 
 /** Queues whose jobs spend the platform's model key on learning. */

@@ -403,7 +403,7 @@ async function brainBrief(handle: string, owner: TokenOwner): Promise<ToolOutcom
  * service (direct ID lookup); otherwise lexical fallback while embedding is
  * unavailable (Stage 5 refines semantic runtime).
  */
-async function searchTheShelf(q: string, owner: TokenOwner): Promise<ToolOutcome> {
+async function searchTheShelf(q: string, owner: TokenOwner, category?: string | null): Promise<ToolOutcome> {
   const { listTokenBrains } = await import("@/lib/svod-token-scopes");
   const allowed = await listTokenBrains(owner.userId, owner.tokenId);
   if (!allowed.length) return notFound("", owner);
@@ -424,15 +424,27 @@ async function searchTheShelf(q: string, owner: TokenOwner): Promise<ToolOutcome
     ...allowed.filter((b) => (b as Brain).project_id != null),
     ...allowed.filter((b) => (b as Brain).project_id == null),
   ];
-  const { hits } = await searchBrain(ordered.map((b) => b.id), q, { limit: 8 });
+  // Stage 5 Svod path (no reranker, lexical fallback while embeddings are
+  // down). Scope is the already-intersected token shelf — never wider.
+  const { searchSvodScope } = await import("@/lib/svod-notes");
+  const hits = await searchSvodScope(ordered.map((b) => b.id), q, 8, { category }).catch(() => []);
   if (!hits.length) {
     return {
       text: `Nothing on your shelf answers: ${q}\n\nCall brain_list to see what you have.`,
       results: 0,
     };
   }
-  const enriched = await withFolderPaths(hits);
-  const best = hits[0].brain_slug;
+  // Already enriched with brain + folder provenance by the scope search.
+  const enriched = hits.map((h) => ({
+    brain_id: h.brain_id ?? "",
+    brain_slug: h.brain_slug ?? "",
+    brain_title: h.brain_title ?? "",
+    folder_path: h.folder_path ?? "",
+    note_id: h.note_id,
+    title: h.title,
+    excerpt: h.excerpt,
+  }));
+  const best = enriched[0]?.brain_slug ?? "";
   return {
     text:
       `No brain was named, so this searched your token's bases (project first).\n\n` +
@@ -442,7 +454,7 @@ async function searchTheShelf(q: string, owner: TokenOwner): Promise<ToolOutcome
       `\n\nMost of this came from "${best}" — searching it directly gives more ` +
       `of it: brain_search {"brain": "${best}", "query": ${JSON.stringify(q)}}`,
     results: hits.length,
-    topScore: hits[0]?.score,
+    topScore: (hits[0] as unknown as { rank?: number })?.rank,
   };
 }
 
@@ -460,7 +472,9 @@ function provenanceLine(h: {
   return parts.join(" · ");
 }
 
-async function withFolderPaths<T extends { brain_slug: string; note_id: string }>(
+/** Kept for the pre-stage-5 hybrid path and external callers; the Svod
+ *  brain_search/shelf path enriches inside searchSvodScope instead. */
+export async function withFolderPaths<T extends { brain_slug: string; note_id: string }>(
   hits: (T & { excerpt: string })[],
 ): Promise<(T & { excerpt: string; brain_id: string; brain_title: string; folder_id: string | null; folder_path: string })[]> {
   if (!hits.length) return [];
@@ -543,7 +557,9 @@ async function brainSearch(
   const q = String(args.query ?? args.q ?? "");
 
   // Called without a brain: search the token's whole shelf (project first).
-  if (!handle.trim() && q.trim()) return searchTheShelf(q, owner);
+  if (!handle.trim() && q.trim()) {
+    return searchTheShelf(q, owner, typeof args.category === "string" ? args.category : null);
+  }
 
   const resolved = await resolveBrain(handle, owner.userId, owner.tokenId);
   if (!resolved) return notFound(handle, owner);
@@ -599,10 +615,23 @@ async function brainSearch(
     fullScope = [...scope, ...thematic];
   }
 
-  const { hits, degraded, reranked, withheld } = await searchBrain(fullScope, q, {
-    limit: typeof args.limit === "number" ? args.limit : undefined,
-    category: typeof args.category === "string" ? args.category : null,
-  });
+  const { hits, degraded, withheld } = await (async () => {
+    // Stage 5 Svod path: lexical + semantic sections, no reranker.
+    const { searchSvodScope } = await import("@/lib/svod-notes");
+    const { getSvodEmbedState } = await import("@/lib/embed");
+    const lim = typeof args.limit === "number" ? args.limit : 8;
+    const cat = typeof args.category === "string" ? args.category : null;
+    const svodHits = await searchSvodScope(fullScope, q, lim, { category: cat }).catch(() => []);
+    const list: typeof svodHits = Array.isArray(svodHits) ? svodHits : [];
+    let lexOnly = false;
+    try {
+      const st = await getSvodEmbedState();
+      lexOnly = !st.usable;
+    } catch {
+      lexOnly = true;
+    }
+    return { hits: list, degraded: lexOnly, withheld: null as number | null };
+  })();
 
   if (!hits.length) {
     return {
@@ -617,7 +646,28 @@ async function brainSearch(
     };
   }
 
-  const enriched = await withFolderPaths(hits);
+  // searchSvodScope already carries brain + folder provenance (same token
+  // boundary); keep the project-first supplement ordering.
+  interface SvodEnriched {
+    brain_id: string;
+    brain_slug: string;
+    brain_title: string;
+    folder_path: string;
+    folder_id?: string | null;
+    excerpt: string;
+    title: string;
+    note_id: string;
+  }
+  const enriched: SvodEnriched[] = hits.map((h) => ({
+    brain_id: h.brain_id ?? "",
+    brain_slug: h.brain_slug ?? "",
+    brain_title: h.brain_title ?? "",
+    folder_path: h.folder_path ?? "",
+    folder_id: h.folder_id,
+    excerpt: h.excerpt,
+    title: h.title,
+    note_id: h.note_id,
+  }));
   // Project-first ordering for the supplement case.
   const projectIds = new Set(scope);
   enriched.sort((a, b) => {
@@ -633,7 +683,6 @@ async function brainSearch(
     anyClipped ||= clip.clipped;
     return (
       `[${i + 1}] ${h.title}` +
-      (hits[i].category ? `  (${hits[i].category})` : "") +
       (acrossFamily ? `  — from ${h.brain_slug} (${h.brain_title})` : "") +
       `\n${provenanceLine(h)}\n${clip.text}`
     );
@@ -655,16 +704,14 @@ async function brainSearch(
     text:
       (degraded
         ? "Note: semantic search is unavailable, these are keyword matches only (lexical fallback).\n\n"
-        : !reranked && enriched.length > 1
-          ? "Note: reranking is unavailable, these are in hybrid-search order.\n\n"
-          : "") +
+        : "") +
       blocks.join("\n\n---\n\n") +
       clippedHint +
       narrow,
     brainId: resolved.brain.id,
     ownerId: resolved.brain.owner_id,
     results: enriched.length,
-    topScore: hits[0]?.score,
+    topScore: (hits[0] as unknown as { rank?: number })?.rank,
   };
 }
 

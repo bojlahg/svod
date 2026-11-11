@@ -1,7 +1,7 @@
 import { tx } from "@/db";
 import type { Note } from "@/db/types";
-import { chunksForNote, estimateTokens } from "@/lib/chunk";
 import { folderInBrain, isUuid } from "@/lib/svod-folders";
+import { syncSvodSections, wakeSvodIndexer } from "@/lib/svod-index";
 
 /**
  * Stage3 newline semantics: compare with every HTML-normalized newline variant
@@ -242,7 +242,8 @@ export async function approveProposal(opts: {
   if (destBrainId && !isUuid(destBrainId)) return { ok: false, reason: "Base not found." };
   if (opts.destFolderId && !isUuid(opts.destFolderId)) return { ok: false, reason: "Folder is in another base." };
 
-  return tx(async (client) => {
+  let woke = false;
+  const out: ApproveResult = await tx(async (client): Promise<ApproveResult> => {
     const cur = await client.query<Note>(
       `select * from notes where id = $1 and status = 'pending' for update`,
       [opts.proposalId],
@@ -306,14 +307,14 @@ export async function approveProposal(opts: {
         [proposal.id, finalBrainId, finalFolderId, finalTitle, finalBody],
       );
       if (!flipped.rowCount) return { ok: false, reason: "Proposal is no longer pending." };
-      const texts = chunksForNote(finalTitle, finalBody);
-      for (const text of texts) {
-        await client.query(
-          `insert into chunks (brain_id, note_id, content, token_count, embedding)
-           values ($1, $2, $3, $4, null)`,
-          [finalBrainId, proposal.id, text, estimateTokens(text)],
-        );
-      }
+      // Stage 5 sections (same tx as activation; outbox only when auto-index).
+      const sync = await syncSvodSections(client, {
+        brainId: finalBrainId,
+        noteId: proposal.id,
+        title: finalTitle,
+        body: finalBody,
+      });
+      if (sync.queued) woke = true;
       await client.query(`update brains set content_changed_at = now() where id = $1`, [finalBrainId]);
       if (finalBrainId !== sourceBrainId) {
         await client.query(`update brains set content_changed_at = now() where id = $1`, [sourceBrainId]);
@@ -356,14 +357,13 @@ export async function approveProposal(opts: {
         [finalBrainId, finalFolderId, finalTitle, finalBody, proposal.proposed_by, proposal.token_id],
       );
       const newNote = moved.rows[0];
-      const texts = chunksForNote(finalTitle, finalBody);
-      for (const text of texts) {
-        await client.query(
-          `insert into chunks (brain_id, note_id, content, token_count, embedding)
-           values ($1, $2, $3, $4, null)`,
-          [finalBrainId, newNote.id, text, estimateTokens(text)],
-        );
-      }
+      const syncMoved = await syncSvodSections(client, {
+        brainId: finalBrainId,
+        noteId: newNote.id,
+        title: finalTitle,
+        body: finalBody,
+      });
+      if (syncMoved.queued) woke = true;
       await client.query(
         `update notes set status = 'superseded', superseded_by = $2,
            superseded_reason = $3 where id = $1 and status = 'pending'`,
@@ -379,15 +379,14 @@ export async function approveProposal(opts: {
         where id = $1 and brain_id = $2`,
       [targetId, sourceBrainId, finalFolderId, finalTitle, finalBody, proposal.token_id],
     );
-    await client.query(`delete from chunks where note_id = $1`, [targetId]);
-    const texts = chunksForNote(finalTitle, finalBody);
-    for (const text of texts) {
-      await client.query(
-        `insert into chunks (brain_id, note_id, content, token_count, embedding)
-         values ($1, $2, $3, $4, null)`,
-        [sourceBrainId, targetId, text, estimateTokens(text)],
-      );
-    }
+    // Stage 5: reconcile sections (unchanged hashes keep id + vector).
+    const syncEdit = await syncSvodSections(client, {
+      brainId: sourceBrainId,
+      noteId: targetId,
+      title: finalTitle,
+      body: finalBody,
+    });
+    if (syncEdit.queued) woke = true;
     await client.query(
       `update notes set status = 'superseded', superseded_by = $2 where id = $1 and status = 'pending'`,
       [proposal.id, targetId],
@@ -395,6 +394,8 @@ export async function approveProposal(opts: {
     await client.query(`update brains set content_changed_at = now() where id = $1`, [sourceBrainId]);
     return { ok: true, kind: "edit", noteId: targetId };
   });
+  if (woke) await wakeSvodIndexer().catch(() => {});
+  return out;
 }
 
 export async function rejectProposal(proposalId: string): Promise<boolean> {

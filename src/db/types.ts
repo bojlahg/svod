@@ -57,6 +57,10 @@ export interface Brain {
    *  NOT NULL = private project base. Keyed by this, never display title.
    *  Global unique where not null (0095), immutable after creation. */
   project_id: string | null;
+  /** SVOD stage 5: automatic section-embedding queue. Default off (0096), so
+   *  an upgrade never queues the whole corpus by itself. Optional in code
+   *  because pre-0096 rows and unit stubs omit it (missing reads as off). */
+  auto_index?: boolean;
   note_count: number;
   source_count: number;
   /** 0 means free. Access to a paid brain is bought once, from balance. */
@@ -183,12 +187,37 @@ export interface Folder {
   updated_at: Date;
 }
 
+export type SvodEmbedState = "ready" | "pending" | "error";
+
 export interface Chunk {
   id: string;
   brain_id: string;
   note_id: string;
   content: string;
   token_count: number;
+  /** SVOD stage 5: SHA-256 of the embed input (title + "\n\n" + section slice).
+   *  NULL = legacy chunk, never matches a section (0096). */
+  input_hash: string | null;
+  section_ordinal: number | null;
+  /** Confirmed fingerprint id that produced `embedding`. NULL = unconfirmed /
+   *  legacy vector, excluded from the Svod semantic leg (0096). */
+  embed_fingerprint: string | null;
+  embed_error: string | null;
+  embed_state: SvodEmbedState;
+}
+
+/** SVOD stage 5 durable embed queue (0096). One open row per chunk. */
+export interface SvodEmbedOutboxRow {
+  id: string;
+  chunk_id: string;
+  brain_id: string;
+  note_id: string;
+  input_hash: string;
+  attempts: number;
+  last_error: string | null;
+  not_before: Date;
+  locked_at: Date | null;
+  created_at: Date;
 }
 
 export interface Check {

@@ -8,8 +8,10 @@ import {
   createSvodNoteAction,
   editSvodNoteAction,
   moveSvodNoteAction,
+  refreshSvodIndexAction,
   renameBase,
   renameFolder,
+  setSvodAutoIndexAction,
   uploadMdAction,
 } from "@/app/brains/[slug]/svod-actions";
 
@@ -24,7 +26,9 @@ export type SvodWorkspaceOp =
   | "notemove"
   | "notecreate"
   | "noteedit"
-  | "markdownupload";
+  | "markdownupload"
+  | "indexrefresh"
+  | "indexauto";
 
 const handlers: Record<SvodWorkspaceOp, (fd: FormData) => Promise<unknown>> = {
   baserename: (fd) => renameBase(fd),
@@ -34,6 +38,8 @@ const handlers: Record<SvodWorkspaceOp, (fd: FormData) => Promise<unknown>> = {
   notecreate: (fd) => createSvodNoteAction(fd),
   noteedit: (fd) => editSvodNoteAction(fd),
   markdownupload: (fd) => uploadMdAction(null, fd),
+  indexrefresh: (fd) => refreshSvodIndexAction(fd),
+  indexauto: (fd) => setSvodAutoIndexAction(fd),
 };
 
 function isSameOrigin(req: Request): boolean {

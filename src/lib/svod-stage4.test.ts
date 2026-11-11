@@ -381,8 +381,9 @@ test("unchanged old version stays while a pending edit exists (revision contract
   assert.ok(!/target_version/.test(src), "timestamp version removed");
   assert.match(src, /revision/);
   assert.match(src, /remains pending|changed after this proposal/i);
-  assert.match(src, /delete from chunks where note_id/);
-  assert.match(src, /chunksForNote\(finalTitle, finalBody\)/);
+  // Stage 5: section sync reconciles chunks in the same tx (legacy direct
+  // delete+chunksForNote replaced by hash-stable syncSvodSections).
+  assert.match(src, /syncSvodSections/);
   assert.match(src, /expectedProposalRevision/);
   assert.match(src, /expectedSourceBrainId/);
 });
@@ -559,6 +560,16 @@ test("approval without saving writes stored BOM+LF bytes to the target", async (
       targetBody = params[4];
       return [];
     }
+    // Stage 5 section sync (replaces the legacy delete+chunksForNote pair).
+    if (/select auto_index from brains/.test(text)) return [{ auto_index: false }];
+    if (/from chunks\s+where note_id/.test(text)) return [];
+    if (/delete from chunks where id/.test(text)) return [];
+    if (/update chunks set section_ordinal/.test(text)) return [];
+    if (/insert into chunks/.test(text)) {
+      chunkContents.push(String(params[2]));
+      return [{ id: `c${chunkContents.length}` }];
+    }
+    if (/svod_embed_outbox/.test(text)) return [];
     if (/delete from chunks where note_id/.test(text)) return [];
     if (/insert into chunks \(brain_id, note_id, content, token_count, embedding\)/.test(text)) {
       chunkContents.push(String(params[2]));

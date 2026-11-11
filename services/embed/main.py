@@ -4,19 +4,33 @@ Embedding service — bge-m3, 1024 dims, strong on Russian and English.
 Local and free, which matters twice over: brains will be half-Russian, and it
 removes one more paid dependency from the stack.
 
-  POST /embed   {"texts": ["..."], "kind": "passage" | "query"}  -> {"vectors": [[...]]}
+  POST /embed   {"texts": ["..."], "kind": "passage" | "query"}  -> {"vectors": [[...]], "dim": 1024, "model": ..., "fingerprint_id": ..., "confirmed": bool}
   POST /rerank  {"query": "...", "documents": [...], "top_n": N} -> {"results": [{index, score}]}
-  GET  /health
+  GET  /health            (never waits for the inference lock; loaded:false while warming)
+  GET  /fingerprint       (fields + id + confirmed, no model load required)
 """
 
 from __future__ import annotations
 
+import itertools
+import math
 import os
+import queue as queue_mod
+import threading
+from concurrent.futures import Future
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sentence_transformers import CrossEncoder, SentenceTransformer
+
+from fingerprint import (
+    FINGERPRINT_FIELDS,
+    build_fingerprint,
+    canonical_fingerprint_json,
+    checkpoint_settings,
+    fingerprint_id,
+    resolve_revision,
+)
 
 MODEL_NAME = os.environ.get("EMBED_MODEL", "BAAI/bge-m3")
 MAX_BATCH = int(os.environ.get("EMBED_MAX_BATCH", "64"))
@@ -40,18 +54,152 @@ RERANK_QUANTIZE = os.environ.get("RERANK_QUANTIZE", "") == "1"
 # lanes together should not ask for more than the host has.
 EMBED_THREADS = int(os.environ.get("EMBED_THREADS", "0"))
 if EMBED_THREADS > 0:
-    import torch
+    try:
+        import torch
 
-    torch.set_num_threads(EMBED_THREADS)
+        torch.set_num_threads(EMBED_THREADS)
+    except Exception:
+        pass
+
+# ─── fingerprint fields (no model load required) ────────────────────────────
+# bge-m3 needs no asymmetric prefixes (unlike e5). The service reports the
+# prefixes it really applies and applies them itself; Node sends raw text and
+# never adds a prefix a second time.
+
+EMBED_TOKENIZER = os.environ.get("EMBED_TOKENIZER", "bge-m3")
+EMBED_POOLING = os.environ.get("EMBED_POOLING", "cls")
+EMBED_NORMALIZE = os.environ.get("EMBED_NORMALIZE", "1") != "0"
+EMBED_MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "8192"))
+EMBED_QUERY_PREFIX = os.environ.get("EMBED_QUERY_PREFIX", "")
+EMBED_PASSAGE_PREFIX = os.environ.get("EMBED_PASSAGE_PREFIX", "")
+EMBED_DIM_EXPECTED = int(os.environ.get("EMBED_DIM", "1024"))
+
+
+def _model_dir_or_none() -> str | None:
+    # A local directory (Docker volume /models/bge-m3) vs a remote HF name.
+    name = MODEL_NAME
+    try:
+        if os.path.isdir(name):
+            return name
+    except Exception:
+        pass
+    return None
+
+
+def fingerprint_fields() -> dict:
+    # Fallbacks apply only when the checkpoint does not say. encode() always
+    # L2-normalises and applies the prefixes below, so those two follow the
+    # code path rather than a label the encoder ignores.
+    fields = {
+        "model": MODEL_NAME,
+        "revision": resolve_revision(_model_dir_or_none()),
+        "tokenizer": EMBED_TOKENIZER,
+        "pooling": EMBED_POOLING,
+        "normalize": True,
+        "max_length": EMBED_MAX_LENGTH,
+        "query_prefix": EMBED_QUERY_PREFIX,
+        "passage_prefix": EMBED_PASSAGE_PREFIX,
+        "dim": EMBED_DIM_EXPECTED,
+    }
+    fields.update(checkpoint_settings(_model_dir_or_none()))
+    fields["normalize"] = True
+    fields["query_prefix"] = EMBED_QUERY_PREFIX
+    fields["passage_prefix"] = EMBED_PASSAGE_PREFIX
+    return fields
+
+
+def fingerprint_record() -> dict:
+    return build_fingerprint(fingerprint_fields())
+
+
+def _device_info() -> dict:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            try:
+                name = torch.cuda.get_device_name(0)
+            except Exception:
+                name = "cuda"
+            return {"device": "cuda", "device_name": name}
+        return {"device": "cpu"}
+    except Exception:
+        return {"device": "cpu"}
+
 
 app = FastAPI(title="mozg-embed")
-_model: SentenceTransformer | None = None
-_reranker: CrossEncoder | None = None
+
+# Lazy to keep /health responsive while weights load: None until first encode
+# (or the background warm thread finishes). /health and /fingerprint never
+# touch the inference lock.
+_model = None  # SentenceTransformer | None
+_reranker = None  # CrossEncoder | None
+
+# ─── single inference thread with query priority ────────────────────────────
+# One torch stream: queries jump ahead of the next waiting passage batch,
+# including when query and passage hit the same endpoint. PriorityQueue orders
+# by (priority, seq): query=0 beats passage=1, FIFO inside each lane.
+
+_job_queue: queue_mod.PriorityQueue = queue_mod.PriorityQueue()
+_job_seq = itertools.count()
+_worker_started = False
+_worker_lock = threading.Lock()
 
 
-def model() -> SentenceTransformer:
+def _ensure_worker() -> None:
+    global _worker_started
+    with _worker_lock:
+        if _worker_started:
+            return
+        t = threading.Thread(target=_inference_loop, name="embed-infer", daemon=True)
+        t.start()
+        _worker_started = True
+
+
+def _inference_loop() -> None:
+    while True:
+        _priority, _seq, fut, texts, kind = _job_queue.get()
+        try:
+            vecs = _encode_now(texts, kind)
+            if not fut.done():
+                fut.set_result(vecs)
+        except Exception as e:  # noqa: BLE001 — the waiter sees the failure
+            if not fut.done():
+                fut.set_exception(e)
+        finally:
+            _job_queue.task_done()
+
+
+def _encode_now(texts: list[str], kind: str):
+    m = model()
+    # Service-side prefixes (empty for bge-m3): applied here, never by Node.
+    if kind == "query" and EMBED_QUERY_PREFIX:
+        texts = [EMBED_QUERY_PREFIX + t for t in texts]
+    elif kind == "passage" and EMBED_PASSAGE_PREFIX:
+        texts = [EMBED_PASSAGE_PREFIX + t for t in texts]
+    vectors = m.encode(
+        texts,
+        normalize_embeddings=True,
+        batch_size=min(len(texts), 16),
+        show_progress_bar=False,
+    )
+    return vectors
+
+
+def submit_inference(texts: list[str], kind: str, timeout: float | None) -> list:
+    _ensure_worker()
+    fut: Future = Future()
+    seq = next(_job_seq)
+    priority = 0 if kind == "query" else 1
+    _job_queue.put((priority, seq, fut, list(texts), kind))
+    return fut.result(timeout=timeout)
+
+
+def model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(MODEL_NAME)
     return _model
 
@@ -65,9 +213,11 @@ _SELF_TEST = [
 ]
 
 
-def reranker() -> CrossEncoder:
+def reranker():
     global _reranker
     if _reranker is None:
+        from sentence_transformers import CrossEncoder
+
         # Lazy, unlike the embedding model: the reranker is optional and its
         # weights sit on top of bge-m3's, so we only pay for it once reranking
         # is actually requested. A missing model dir raises here and /rerank
@@ -127,19 +277,51 @@ class EmbedResponse(BaseModel):
     vectors: list[list[float]]
     dim: int
     model: str
+    fingerprint_id: str
+    confirmed: bool
 
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    # Never waits for the inference lock and never loads the model: while
+    # weights are still streaming the page stays usable (Markdown reads and
+    # edits work; only semantic search is lexical).
     loaded = _model is not None
+    try:
+        fp = fingerprint_record()
+    except Exception:
+        fp = {"id": "", "confirmed": False}
+    info = _device_info()
+    dim: object = None
+    if loaded:
+        try:
+            dim = int(_model.get_sentence_embedding_dimension())  # type: ignore[union-attr]
+        except Exception:
+            dim = EMBED_DIM_EXPECTED
     return {
         "ok": True,
         "model": MODEL_NAME,
         "loaded": loaded,
-        "dim": _model.get_sentence_embedding_dimension() if loaded else None,
+        "dim": dim,
         "reranker": RERANK_MODEL,
         "reranker_loaded": _reranker is not None,
         "threads": EMBED_THREADS or None,
+        "device": info.get("device"),
+        "device_name": info.get("device_name"),
+        "max_batch": MAX_BATCH,
+        "fingerprint_id": fp.get("id"),
+        "confirmed": fp.get("confirmed"),
+    }
+
+
+@app.get("/fingerprint")
+def fingerprint() -> dict[str, object]:
+    rec = fingerprint_record()
+    return {
+        "fields": rec["fields"],
+        "canonical": rec["canonical"],
+        "id": rec["id"],
+        "confirmed": rec["confirmed"],
     }
 
 
@@ -150,18 +332,43 @@ def embed(req: EmbedRequest) -> EmbedResponse:
     if any(not t.strip() for t in req.texts):
         raise HTTPException(400, "empty text in batch")
 
-    m = model()
-    # Normalised so cosine distance in pgvector is a plain dot product.
-    vectors = m.encode(
-        req.texts,
-        normalize_embeddings=True,
-        batch_size=min(len(req.texts), 16),
-        show_progress_bar=False,
-    )
+    # Query jumps ahead of the next passage batch inside the single inference
+    # thread; /health never queues, so it never waits here.
+    timeout = 30.0 if req.kind == "query" else 300.0
+    try:
+        vectors = submit_inference(req.texts, req.kind, timeout=timeout)
+    except TimeoutError:
+        raise HTTPException(503, "embed inference timed out")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"embed inference failed: {e}")
+
+    rec = fingerprint_record()
+    dim = int(rec["fields"]["dim"])
+    # Validate before returning anything: count, dimensionality and finiteness.
+    # Otherwise 422 with no partial write (no vectors are stored by this
+    # service; the caller must not store a prefix of a bad batch either).
+    try:
+        vec_list = [list(v.tolist() if hasattr(v, "tolist") else v) for v in vectors]
+    except Exception:
+        raise HTTPException(422, "embed returned undecodable vectors")
+    if len(vec_list) != len(req.texts):
+        raise HTTPException(
+            422, f"embed count mismatch: got {len(vec_list)} vectors for {len(req.texts)} texts"
+        )
+    for v in vec_list:
+        if len(v) != dim:
+            raise HTTPException(422, f"embed dim mismatch: got {len(v)}, expected {dim}")
+        for x in v:
+            if not isinstance(x, (int, float)) or not math.isfinite(float(x)):
+                raise HTTPException(422, "embed returned non-finite values")
     return EmbedResponse(
-        vectors=[v.tolist() for v in vectors],
-        dim=int(m.get_sentence_embedding_dimension()),
+        vectors=[[float(x) for x in v] for v in vec_list],
+        dim=dim,
         model=MODEL_NAME,
+        fingerprint_id=str(rec["id"]),
+        confirmed=bool(rec["confirmed"]),
     )
 
 
@@ -205,14 +412,26 @@ def rerank(req: RerankRequest) -> RerankResponse:
 
 @app.on_event("startup")
 def warm() -> None:
-    # Load at boot so the first ingest is not the one paying for it.
-    model()
-    # The reranker must load here too, and not only for latency: lazy loading
-    # happens inside FastAPI's worker thread, where torch initialises modules
-    # on the meta device and then dies with "Cannot copy out of meta tensor"
-    # — the same weights load fine from the main thread. Failure stays
-    # non-fatal: /rerank keeps answering 503 and search falls back to RRF.
+    # Warm in the background so /health answers (loaded:false) while weights
+    # stream. The first /embed pays nothing extra once this lands; until then
+    # it loads on demand through the same single inference thread.
+    def _bg() -> None:
+        try:
+            model()
+        except Exception as exc:  # noqa: BLE001 — degraded service beats no service
+            print(f"[embed] background warm failed: {exc}")
+        # The reranker must load here too, and not only for latency: lazy loading
+        # happens inside FastAPI's worker thread, where torch initialises modules
+        # on the meta device and then dies with "Cannot copy out of meta tensor"
+        # — the same weights load fine from the main thread. Failure stays
+        # non-fatal: /rerank keeps answering 503 and search falls back to RRF.
+        try:
+            reranker()
+        except Exception as exc:  # noqa: BLE001 — degraded service beats no service
+            print(f"[embed] reranker unavailable at boot: {exc}")
+
     try:
-        reranker()
-    except Exception as exc:  # noqa: BLE001 — degraded service beats no service
-        print(f"[embed] reranker unavailable at boot: {exc}")
+        _ensure_worker()
+    except Exception:
+        pass
+    threading.Thread(target=_bg, name="embed-warm", daemon=True).start()

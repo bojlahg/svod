@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.6.0 \
  && pip install --no-cache-dir -r requirements.txt
 
-COPY main.py fetch-model.sh ./
+COPY main.py fingerprint.py fetch-model.sh ./
 RUN chmod +x fetch-model.sh
 
 # Weights live in a volume, not the image: 2.2 GB in a layer makes every deploy

@@ -22,5 +22,10 @@ test("holdLearningQueues skips every learning queue and nothing else", async () 
     registered.sort(),
     Object.values(QUEUES).filter((q) => !LEARNING_QUEUES.includes(q)).sort(),
   );
-  assert.deepEqual(registered.sort(), [QUEUES.digest, QUEUES.generate, QUEUES.mozgpay].sort());
+  // Stage 5 svod-index is not a learning queue: it runs without a paid key.
+  assert.ok(!LEARNING_QUEUES.includes(QUEUES.svodIndex), "svod-index must not be held");
+  assert.deepEqual(
+    registered.sort(),
+    [QUEUES.digest, QUEUES.generate, QUEUES.mozgpay, QUEUES.svodIndex].sort(),
+  );
 });

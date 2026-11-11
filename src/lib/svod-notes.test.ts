@@ -123,9 +123,13 @@ test("unchanged save is a no-op in implementation: no chunk rewrite", async () =
   const fn = src.slice(start, next === -1 ? undefined : next);
   assert.match(fn, /status = 'active'/);
   assert.match(fn, /bodyUnchanged/);
-  // Early return before any chunk delete/insert.
-  const early = fn.slice(0, fn.indexOf("delete from chunks"));
-  assert.match(early, /return same/);
+  // Early return before any section sync/chunk delete (stage 5 returns the
+  // same row with queued:false; the legacy "return same" shape is gone).
+  const syncAt = fn.indexOf("syncSvodSections");
+  const delAt = fn.indexOf("delete from chunks");
+  const cut = [syncAt, delAt].filter((i) => i !== -1);
+  const early = fn.slice(0, cut.length ? Math.min(...cut) : undefined);
+  assert.match(early, /same\.rows\[0\]/);
 });
 
 test("move keeps ID: implementation updates folder_id only (no delete+insert)", async () => {

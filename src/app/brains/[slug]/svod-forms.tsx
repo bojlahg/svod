@@ -8,6 +8,8 @@ import {
   renameFolder,
   renameBase,
   moveSvodNoteAction,
+  refreshSvodIndexAction,
+  setSvodAutoIndexAction,
 } from "./svod-actions";
 
 type ActionState = { error?: string; ok?: boolean } | null;
@@ -19,7 +21,9 @@ export type SvodWorkspaceOp =
   | "notemove"
   | "notecreate"
   | "noteedit"
-  | "markdownupload";
+  | "markdownupload"
+  | "indexrefresh"
+  | "indexauto";
 
 // router.refresh() stays unreliable for tree reads in this production build,
 // so the four small tree ops reload the document after a successful JSON
@@ -306,6 +310,68 @@ export function SvodNoteMoveForm({
       </select>
       <button className="svod-btn-ghost" type="submit" disabled={pending}>
         {pending ? t("Saving…") : t("Move")}
+      </button>
+      <ErrorLine state={state} />
+    </form>
+  );
+}
+
+export function SvodIndexRefreshForm({ brainId }: { brainId: string }) {
+  const t = useT();
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
+    (_prev: ActionState, formData: FormData) => refreshSvodIndexAction(formData),
+    null,
+  );
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean; queued?: number }>(
+    brainId,
+    "indexrefresh",
+  );
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
+  return (
+    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center" }}>
+      <input type="hidden" name="brainId" value={brainId} />
+      <button className="svod-btn" type="submit" disabled={pending}>
+        {pending ? t("Refreshing…") : t("Refresh embeddings")}
+      </button>
+      <ErrorLine state={state} />
+    </form>
+  );
+}
+
+export function SvodAutoIndexForm({ brainId, initial }: { brainId: string; initial: boolean }) {
+  const t = useT();
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
+    (_prev: ActionState, formData: FormData) => setSvodAutoIndexAction(formData),
+    null,
+  );
+  // No local toggle state: the checkbox carries the desired value (checked =
+  // enabled) and the server is the authority — a successful JSON submit soft
+  // refreshes the page, which re-renders with the new `initial`.
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean }>(brainId, "indexauto");
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
+  return (
+    <form
+      action={fallbackAction}
+      method="post"
+      onSubmit={direct.onSubmit}
+      style={{ display: "flex", gap: ".35rem", alignItems: "center" }}
+    >
+      <input type="hidden" name="brainId" value={brainId} />
+      <label style={{ display: "flex", gap: ".35rem", alignItems: "center", fontSize: ".8125rem" }}>
+        <input
+          type="checkbox"
+          name="enabled"
+          value="1"
+          defaultChecked={initial}
+          disabled={pending}
+          aria-label={t("Auto-index new sections")}
+        />
+        {t("Auto-index")}
+      </label>
+      <button className="svod-btn-ghost" type="submit" disabled={pending}>
+        {pending ? t("Saving…") : t("Save")}
       </button>
       <ErrorLine state={state} />
     </form>

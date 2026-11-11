@@ -17,15 +17,18 @@ import {
 } from "@/lib/svod-folders";
 import { listAccessibleBrains } from "@/lib/svod-access";
 import { getPendingSvodNote, getSvodNote, searchSvodNotes } from "@/lib/svod-notes";
+import { getSvodIndexStatus } from "@/lib/svod-index";
 import SvodMarkdown from "@/components/SvodMarkdown";
 import SvodEditor from "./svod-editor";
 import SvodUpload from "./svod-upload";
 import ConfirmForm from "@/components/ConfirmForm";
 import { deleteSvodNoteAction } from "./svod-actions";
 import {
+  SvodAutoIndexForm,
   SvodBaseRenameForm,
   SvodFolderCreateForm,
   SvodFolderRenameForm,
+  SvodIndexRefreshForm,
   SvodNoteMoveForm,
 } from "./svod-forms";
 import { rejectNote } from "./review-actions";
@@ -116,18 +119,32 @@ export default async function SvodWorkspacePage({
     notesByFolder.set(key, [...(notesByFolder.get(key) ?? []), n]);
   }
 
-  const [pendingCountRow, indexingRow] = await Promise.all([
+  const [pendingCountRow, indexStatus] = await Promise.all([
     query<{ n: number }>(
       `select count(*)::int as n from notes where brain_id = $1 and status = 'pending'`,
       [brain.id],
     ).then((r) => r[0]?.n ?? 0),
-    query<{ n: number }>(
-      `select count(*)::int as n from notes n
-        where n.brain_id = $1 and n.status = 'active'
-          and exists (select 1 from chunks c where c.note_id = n.id and c.embedding is null)`,
-      [brain.id],
-    ).then((r) => r[0]?.n ?? 0),
+    getSvodIndexStatus(brain.id).catch(() => ({
+      autoIndex: false,
+      pendingNotes: 0,
+      pendingChunks: 0,
+      errorChunks: 0,
+      lastError: null as string | null,
+    })),
   ]);
+
+  // Embed fingerprint for the status line (read-only; never blocks the page).
+  // While the model is still loading Markdown stays readable and editable.
+  let embedNote: string | null = null;
+  let embedReady = false;
+  try {
+    const { getSvodEmbedState } = await import("@/lib/embed");
+    const st = await getSvodEmbedState();
+    embedReady = st.usable;
+    if (!st.usable) embedNote = st.reason;
+  } catch {
+    embedNote = "embed service unavailable";
+  }
 
   const pendingNotes = canReview
     ? await query<{
@@ -322,9 +339,34 @@ export default async function SvodWorkspacePage({
           {t("pending review")}: {pendingCountRow}
         </span>
         <span>
-          {t("awaiting index")}: {indexingRow}
+          {t("awaiting index")}: {indexStatus.pendingNotes}
         </span>
+        <span>
+          {t("chunks in progress")}: {indexStatus.pendingChunks}
+        </span>
+        <span>
+          {t("index errors")}: {indexStatus.errorChunks}
+        </span>
+        {indexStatus.lastError ? (
+          <span>
+            {t("last index error")}: {indexStatus.lastError.slice(0, 160)}
+          </span>
+        ) : null}
+        {!embedReady ? (
+          <span>
+            {embedNote
+              ? `${t("semantic search unavailable")}: ${embedNote.slice(0, 160)}`
+              : t("embedding model is loading — reading and editing still work")}
+          </span>
+        ) : null}
       </div>
+
+      {canEdit ? (
+        <div className="svod-index-controls" style={{ display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "center", marginBottom: ".6rem" }}>
+          <SvodIndexRefreshForm brainId={brain.id} />
+          <SvodAutoIndexForm brainId={brain.id} initial={indexStatus.autoIndex} />
+        </div>
+      ) : null}
 
       <div className="svod-searchrow">
         <form method="get" action={baseHref} role="search" style={{ display: "flex", gap: ".5rem", flex: 1, minWidth: 0 }}>

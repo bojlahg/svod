@@ -63,8 +63,8 @@ export const TOOLS: ToolDef[] = [
     description:
       "Search one allowed base (or your token shelf when brain is omitted, project first). " +
       "Call BEFORE answering project-specific questions. Exact UUID queries read by ID " +
-      "without embeddings; otherwise hybrid search with lexical fallback while embeddings " +
-      "are down (Stage 5 refines semantics). Returns excerpts with brain UUID/title, note ID " +
+      "without embeddings; otherwise lexical plus semantic sections with lexical fallback " +
+      "while embeddings are down (no reranker on this path). Returns excerpts with brain UUID/title, note ID " +
       "and folder path — excerpts are cut; brain_read gives the full note. Project search " +
       "first, allowed thematic bases supplement when searching a project base.",
     inputSchema: {

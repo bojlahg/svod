@@ -251,3 +251,30 @@ export async function uploadMdAction(_prev: unknown, formData: FormData) {
     throw e;
   }
 }
+
+/**
+ * SVOD stage 5 manual refresh + auto-index switch.
+ *
+ * Editor-only (canEdit); readers get the same "not found" as strangers —
+ * denial, never a cross-base substitution. Both run through the shared
+ * workspace policy by stable base ID and re-check the base after.
+ */
+export async function refreshSvodIndexAction(formData: FormData) {
+  const found = await editableBrain(formData);
+  if (!found) return { error: "Base not found." };
+  const { refreshSvodBrain } = await import("@/lib/svod-index");
+  const r = await refreshSvodBrain(found.brain.id);
+  revalidateBrain(found.brain.id, found.brain.slug);
+  return { ok: true as const, queued: r.queued };
+}
+
+export async function setSvodAutoIndexAction(formData: FormData) {
+  const found = await editableBrain(formData);
+  if (!found) return { error: "Base not found." };
+  const raw = String(formData.get("enabled") ?? "").trim().toLowerCase();
+  const enabled = raw === "1" || raw === "true" || raw === "on";
+  const { setSvodAutoIndex } = await import("@/lib/svod-index");
+  const r = await setSvodAutoIndex(found.brain.id, enabled);
+  revalidateBrain(found.brain.id, found.brain.slug);
+  return { ok: true as const, enabled, queued: r.queued };
+}

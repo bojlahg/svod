@@ -28,6 +28,13 @@ cd "$(dirname "$0")"
 TARGET="${1:-bge-m3}"
 HOST="https://huggingface.co"
 [ "${MIRROR:-0}" = "1" ] && HOST="https://hf-mirror.com"
+# Pinned checkpoint for reproducible fingerprints (stage 5). Override with
+# EMBED_REVISION=... to move deliberately; empty means "main" (unconfirmed).
+PINNED_REVISION="5617a9f61b028005a4858fdac845db406aefb181"
+REVISION="${EMBED_REVISION:-$PINNED_REVISION}"
+if [ -z "$REVISION" ]; then
+  REVISION="main"
+fi
 
 case "$TARGET" in
   bge-m3)
@@ -86,7 +93,7 @@ for f in "${SMALL[@]}"; do
   fi
   printf '  %-40s ' "$f"
   if curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 \
-       -o "$out" "$HOST/$REPO/resolve/main/$f"; then
+       -o "$out" "$HOST/$REPO/resolve/$REVISION/$f"; then
     echo "ok ($(du -h "$out" | cut -f1))"
   else
     rm -f "$out"
@@ -97,7 +104,7 @@ done
 
 # ─── the big one ─────────────────────────────────────────────────────────────
 
-url="$HOST/$REPO/resolve/main/$LARGE"
+url="$HOST/$REPO/resolve/$REVISION/$LARGE"
 out="$DEST/$LARGE"
 touch "$out"
 
@@ -148,6 +155,7 @@ while :; do
 done
 
 printf '\r    100%%  %s MB          \n' "$((total / 1024 / 1024))"
+echo "$REVISION" > "$DEST/revision.txt"
 echo
-echo "✓ model ready. Point the service at it:"
+echo "✓ model ready (revision $REVISION). Point the service at it:"
 echo "    $ENV_VAR=$(cd "$DEST" && pwd)"

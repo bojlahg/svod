@@ -4,11 +4,6 @@ import { embedQuery } from "@/lib/embed";
 import { applyRerank, keepRelevant, rerank } from "@/lib/rerank";
 import { toTsQuery } from "@/lib/tsquery";
 import { normalizeCategory, topLevelCategory } from "@/lib/category";
-import {
-  groupHitsByBrain,
-  type CollectiveBrain,
-  type CollectiveResult,
-} from "@/lib/collective";
 
 /**
  * Hybrid retrieval: vector + full-text, fused with Reciprocal Rank Fusion,
@@ -492,30 +487,4 @@ export async function briefBrain(brainId: string): Promise<BrainBrief> {
   };
 }
 
-/**
- * One query against every public brain at once — the working half of
- * /collective and its API. Public brains only, ever: the feature is a shop
- * window, and a private brain in it would be a leak, not a result. Only
- * each brain's OWN notes are searched (the ids themselves, not families) —
- * a private child of a public parent stays out of it too.
- */
-export async function searchCollective(
-  q: string,
-  opts: { topic?: string | null } = {},
-): Promise<CollectiveResult[]> {
-  // Cap the fan-out: past a hundred brains the vector leg would scan the
-  // whole platform for a page that shows five answers.
-  const brains = await query<CollectiveBrain & { id: string }>(
-    `select b.id, b.slug, b.title, u.handle
-       from brains b join "user" u on u.id = b.owner_id
-      where b.visibility = 'public' and b.note_count > 0 and u.handle is not null
-        and ($1::text is null or b.topic = $1)
-      order by b.score desc nulls last, b.note_count desc
-      limit 100`,
-    [opts.topic ?? null],
-  );
-  if (!brains.length) return [];
 
-  const { hits } = await searchBrain(brains.map((b) => b.id), q, { limit: 15 });
-  return groupHitsByBrain(hits, brains);
-}

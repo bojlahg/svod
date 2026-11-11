@@ -7,7 +7,6 @@ import { env } from "./env";
 import { sendMail } from "./mail";
 import { cookies } from "next/headers";
 import { captureServer } from "./analytics";
-import { REFERRAL_COOKIE } from "./referral";
 
 /**
  * Identity. better-auth owns the "user"/"session"/"account"/"verification"
@@ -127,25 +126,6 @@ export const auth = betterAuth({
           } catch {
             // No request context (a script, a test) or the column is not there
             // yet on a stale deploy. Either way the account matters more.
-          }
-
-          // Who gets paid for this account. Same best-effort rule as above and
-          // for the same reason, but this one is money, so the handle in the
-          // cookie is resolved against the table rather than trusted, and a
-          // link to yourself credits nobody.
-          try {
-            const claim = (await cookies()).get(REFERRAL_COOKIE)?.value?.slice(0, 30);
-            if (claim) {
-              await pool.query(
-                `update "user" u set referred_by = r.id
-                   from "user" r
-                  where u.id = $1 and r.handle = $2 and r.id <> u.id`,
-                [user.id, claim],
-              );
-            }
-          } catch {
-            // Same trade as the source above: the account is worth more than
-            // the attribution on it.
           }
 
           // The top of the v1 funnel: signup → first brain_search (PLAN.md).

@@ -136,28 +136,6 @@ test("onePerHandle keeps the first row, which is the truer relationship", async 
   );
 });
 
-test("brain_find's answer carries the evidence, not just the handle", async () => {
-  const { foundText } = await import("./mcp");
-  const out = foundText(
-    "how does RLS work in supabase",
-    [
-      {
-        handle: "mozg",
-        slug: "supabase",
-        title: "Supabase",
-        answers: [{ title: "Row level security", snippet: "Enable RLS on every table." }],
-      },
-      { handle: "mozg", slug: "drizzle", title: "Drizzle", answers: [] },
-    ],
-    new Set(["mozg/drizzle"]),
-  );
-
-  assert.match(out, /mozg\/supabase/);
-  assert.match(out, /Row level security: Enable RLS on every table\./);
-  assert.match(out, /mozg\/drizzle — Drizzle \(on your shelf\)/);
-  assert.match(out, /brain_search \{"brain": "mozg\/supabase"/);
-});
-
 test("SVOD: brain_find is retired — no catalogue search without a grant", async () => {
   stubDb(() => []);
   const out = await callTool("brain_find", { question: "how do I fold a paper crane" }, owner);

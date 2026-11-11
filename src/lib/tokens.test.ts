@@ -7,11 +7,9 @@ import {
   hashToken,
   issueLimitReached,
   issueToken,
-  quotaRemaining,
   verifyToken,
 } from "./tokens";
 import { stubDb } from "./test-db";
-import { PLANS } from "./plans";
 
 test("hashToken is sha256, never the plaintext", () => {
   const token = "mzg_abc123";
@@ -86,25 +84,6 @@ test("verifyToken rejects malformed tokens without touching the database", async
   assert.equal(await verifyToken(null), null);
   assert.equal(await verifyToken(""), null);
   assert.equal(await verifyToken("sk-not-our-prefix"), null);
-});
-
-test("quotaRemaining is the plan's monthly limit minus this month's calls", async () => {
-  stubDb((text) => {
-    if (/date_trunc\('month'/.test(text)) return [{ used: 5 }];
-    throw new Error(`unexpected query: ${text}`);
-  });
-  // Read from PLANS rather than repeated here: the numbers move when the pricing
-  // moves, and a test that hardcodes them fails for the wrong reason.
-  assert.equal(await quotaRemaining("u1", "free"), PLANS.free.calls - 5);
-  assert.equal(await quotaRemaining("u1", "pro"), PLANS.pro.calls - 5);
-});
-
-test("quotaRemaining never goes negative", async () => {
-  stubDb((text) => {
-    if (/date_trunc\('month'/.test(text)) return [{ used: 9999 }];
-    throw new Error(`unexpected query: ${text}`);
-  });
-  assert.equal(await quotaRemaining("u1", "free"), 0);
 });
 
 test("burstExceeded trips at 60 calls in the last minute", async () => {

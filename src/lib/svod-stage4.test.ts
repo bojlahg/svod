@@ -635,15 +635,6 @@ test("reviewer save with only lone-CR form normalization preserves stored bytes"
   assert.equal(writtenBody, CR);
 });
 
-test("authenticated workspace layout skips the external star banner; public fetch is time-bounded", async () => {
-  const layout = readFileSync(join(__dirname, "..", "app", "layout.tsx"), "utf8");
-  // Signed-in renders must not await the promotional network banner: server
-  // actions revalidate this layout, which hung workspace saves on api.github.com.
-  assert.match(layout, /\{signedIn \? null : <StarBanner \/>\}/);
-  const banner = readFileSync(join(__dirname, "..", "components", "StarBanner.tsx"), "utf8");
-  assert.match(banner, /signal: AbortSignal\.timeout\(3000\)/);
-});
-
 test("edit/rebase revalidates the canonical base route, not just the posted slug", async () => {
   const actions = readFileSync(join(__dirname, "..", "app", "brains", "[slug]", "review-actions.ts"), "utf8");
   // The browser sits on /brains/<uuid> while the form posts the human slug;

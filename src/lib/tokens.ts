@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { maybeOne, query } from "@/db";
 import type { Plan } from "@/db/types";
-import { limitsFor, effectivePlan } from "@/lib/plans";
+import { effectivePlan } from "@/lib/plans";
 
 /**
  * MCP access tokens.
@@ -123,24 +123,6 @@ export async function revokeToken(userId: string, tokenId: string): Promise<void
     `update mcp_tokens set revoked_at = now() where id = $1 and user_id = $2`,
     [tokenId, userId],
   );
-}
-
-/**
- * Calls left this month on this account.
- *
- * Everyone spends their own: a seat on somebody's pack shares the reading, not
- * the allowance. A colleague who runs out buys their own plan, which is the
- * point — a shared bucket would hide exactly the signal the plans are sold on.
- */
-export async function quotaRemaining(userId: string, plan: Plan): Promise<number> {
-  const row = await maybeOne<{ used: number }>(
-    `select count(*)::int as used from calls
-      where caller_id = $1 and created_at >= date_trunc('month', now())`,
-    [userId],
-  );
-  // lib/plans.ts is the one table for limits — a local copy here is how the
-  // settings page and the enforcement drift apart.
-  return Math.max(0, limitsFor(plan).calls - (row?.used ?? 0));
 }
 
 /**

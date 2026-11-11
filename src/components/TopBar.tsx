@@ -25,31 +25,11 @@ export default async function TopBar({ active }: { active?: string }) {
   return (
     <header className="topbar">
       <div className="shell topbar-inner">
-        {/* The wordmark owns margin-right:auto, so the badge must sit inside
-            the same flex item to stay glued to it. Honest, and load-bearing:
-            it links to the page that says what beta means here and how to
-            help. Not a decoration. */}
         <span style={{ display: "flex", alignItems: "center", gap: ".6rem", marginRight: "auto" }}>
           <Link href="/" className="wordmark" style={{ marginRight: 0 }}>
-            {markup(t("mozg<0>.</0>"), [
+            {markup(t("svod<0>.</0>"), [
             <span key="s0" />,
           ])}</Link>
-          <Link
-            href="/beta"
-            className="mono"
-            title={t("What beta means here, and how to help")}
-            style={{
-              fontSize: ".6875rem",
-              letterSpacing: ".08em",
-              textTransform: "uppercase",
-              padding: ".15rem .45rem",
-              border: "1.5px solid var(--color-riso-red)",
-              color: "var(--color-riso-red)",
-              textDecoration: "none",
-            }}
-          >
-            {t("beta")}
-          </Link>
         </span>
 
         {/* Left of whoever you are, signed in or not: the reader who needs it

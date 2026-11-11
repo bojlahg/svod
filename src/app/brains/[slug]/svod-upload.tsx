@@ -3,6 +3,7 @@
 import { useActionState, useRef } from "react";
 import { useT } from "@/lib/t-client";
 import { uploadMdAction } from "@/app/brains/[slug]/svod-actions";
+import { useSvodWorkspaceSubmit } from "./svod-forms";
 
 /**
  * One uploaded UTF-8 .md becomes one note in the selected folder.
@@ -21,11 +22,22 @@ export default function SvodUpload({
 }) {
   const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [state, action, pending] = useActionState(uploadMdAction, null);
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(uploadMdAction, null);
+  // Consistent JSON path: hydrated POST to /api/brains/[id]/workspace with the
+  // raw File bytes untouched, then router.refresh() on successful JSON. Native
+  // non-JS keeps the same fallback action/auth/validation.
+  const direct = useSvodWorkspaceSubmit<typeof fallbackState & { ok?: boolean }>(
+    brainId,
+    "markdownupload",
+  );
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as typeof fallbackState) ?? fallbackState;
 
   return (
     <form
-      action={action}
+      action={fallbackAction}
+      method="post"
+      onSubmit={direct.onSubmit}
       style={{ display: "flex", gap: ".5rem", alignItems: "flex-end", flexWrap: "wrap" }}
     >
       <input type="hidden" name="brainId" value={brainId} />

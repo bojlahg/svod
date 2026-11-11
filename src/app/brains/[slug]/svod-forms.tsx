@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { useT } from "@/lib/t-client";
 import {
   createFolder,
@@ -10,6 +11,104 @@ import {
 } from "./svod-actions";
 
 type ActionState = { error?: string; ok?: boolean } | null;
+
+export type SvodWorkspaceOp =
+  | "foldercreate"
+  | "folderrename"
+  | "baserename"
+  | "notemove"
+  | "notecreate"
+  | "noteedit"
+  | "markdownupload";
+
+// router.refresh() stays unreliable for tree reads in this production build,
+// so the four small tree ops reload the document after a successful JSON
+// response (same URL/query preserved); note/upload keep soft refresh.
+const HARD_RELOAD_OPS: ReadonlySet<SvodWorkspaceOp> = new Set([
+  "baserename",
+  "foldercreate",
+  "folderrename",
+  "notemove",
+]);
+
+/**
+ * Shared JSON-transport helper (JSON text, multipart File, no Flight).
+ * Native server actions stay as SSR fallback; hydrated sends JSON except upload.
+ */
+export function useSvodWorkspaceSubmit<R extends { ok?: unknown; error?: unknown }>(
+  brainId: string,
+  op: SvodWorkspaceOp,
+  prepare?: (fd: FormData) => void,
+) {
+  const router = useRouter();
+  const t = useT();
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<(R | { error: string }) | null>(null);
+  const busyRef = useRef(false);
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setPending(true);
+    try {
+      const fd = new FormData(e.currentTarget);
+      prepare?.(fd);
+      fd.set("op", op);
+      fd.set("brainId", brainId);
+      const url = `/api/brains/${brainId}/workspace`;
+      const fields: Record<string, string> = {};
+      for (const [name, value] of fd.entries()) {
+        if (typeof value === "string" && !name.startsWith("$ACTION")) {
+          fields[name] = value;
+        }
+      }
+      const res =
+        op === "markdownupload"
+          ? await fetch(url, { method: "POST", body: fd, credentials: "same-origin" })
+          : await fetch(url, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(fields),
+              credentials: "same-origin",
+            });
+      let data: unknown = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data || typeof data !== "object") {
+        const msg =
+          data && typeof data === "object" && "error" in data
+            ? (data as { error?: unknown }).error
+            : null;
+        setResult({
+          error:
+            typeof msg === "string" && msg
+              ? msg
+              : t("Could not save. Check the connection and retry."),
+        } as R | { error: string });
+      } else {
+        setResult(data as R | { error: string });
+        if ("ok" in data && (data as { ok?: unknown }).ok) {
+          if (HARD_RELOAD_OPS.has(op)) {
+            window.location.reload();
+          } else {
+            router.refresh();
+          }
+        }
+      }
+    } catch {
+      setResult({ error: t("Could not save. Check the connection and retry.") } as R | { error: string });
+    } finally {
+      setPending(false);
+      busyRef.current = false;
+    }
+  }
+
+  return { pending, result, onSubmit };
+}
 
 function ErrorLine({ state }: { state: ActionState }) {
   if (!state || !("error" in state) || !state.error) return null;
@@ -28,12 +127,15 @@ export function SvodBaseRenameForm({
   initialTitle: string;
 }) {
   const t = useT();
-  const [state, action, pending] = useActionState(
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
     (_prev: ActionState, formData: FormData) => renameBase(formData),
     null,
   );
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean }>(brainId, "baserename");
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={action} style={{ display: "flex", gap: ".35rem", marginBottom: ".6rem" }}>
+    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginBottom: ".6rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input
         name="title"
@@ -65,13 +167,16 @@ export function SvodFolderCreateForm({
   compact?: boolean;
 }) {
   const t = useT();
-  const [state, action, pending] = useActionState(
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
     (_prev: ActionState, formData: FormData) => createFolder(formData),
     null,
   );
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean }>(brainId, "foldercreate");
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
   if (compact) {
     return (
-      <form action={action} style={{ display: "flex", gap: ".35rem", marginTop: ".35rem" }}>
+      <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginTop: ".35rem" }}>
         <input type="hidden" name="brainId" value={brainId} />
         <input type="hidden" name="slug" value={slug} />
         <input
@@ -90,7 +195,7 @@ export function SvodFolderCreateForm({
     );
   }
   return (
-    <form action={action} style={{ display: "grid", gap: ".4rem", marginTop: ".5rem" }}>
+    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".4rem", marginTop: ".5rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="slug" value={slug} />
       <input
@@ -132,12 +237,15 @@ export function SvodFolderRenameForm({
   currentName: string;
 }) {
   const t = useT();
-  const [state, action, pending] = useActionState(
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
     (_prev: ActionState, formData: FormData) => renameFolder(formData),
     null,
   );
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean }>(brainId, "folderrename");
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={action} style={{ display: "flex", gap: ".25rem" }}>
+    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".25rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="folderId" value={folderId} />
       <input
@@ -171,12 +279,15 @@ export function SvodNoteMoveForm({
   folders: { id: string; label: string }[];
 }) {
   const t = useT();
-  const [state, action, pending] = useActionState(
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
     (_prev: ActionState, formData: FormData) => moveSvodNoteAction(formData),
     null,
   );
+  const direct = useSvodWorkspaceSubmit<ActionState & { ok?: boolean }>(brainId, "notemove");
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={action} style={{ display: "flex", gap: ".35rem", alignItems: "center", flexWrap: "wrap" }}>
+    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center", flexWrap: "wrap" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="slug" value={slug} />
       <input type="hidden" name="noteId" value={noteId} />

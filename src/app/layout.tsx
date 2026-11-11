@@ -98,7 +98,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <Translations dict={dict}>
           <AnnouncementBanner />
-          <StarBanner />
+          {/* Keep authenticated renders independent of the external
+              promotional counter. */}
+          {signedIn ? null : <StarBanner />}
           {children}
           {/* Last in the body, fixed in the corner: it must not participate in the
               page's layout, only sit above it. */}

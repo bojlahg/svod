@@ -49,13 +49,21 @@ test("verifyToken resolves a live token to its owner", async () => {
   const token = "mzg_" + "a".repeat(32);
   stubDb((text) => {
     if (/from mcp_tokens t/.test(text)) {
-      return [{ id: "tok-1", user_id: "u1", token_hash: hashToken(token), plan: "pro" }];
+      return [
+        {
+          id: "tok-1",
+          user_id: "u1",
+          token_hash: hashToken(token),
+          plan: "pro",
+          can_create_project: false,
+        },
+      ];
     }
     if (/update mcp_tokens set last_used_at/.test(text)) return [];
     throw new Error(`unexpected query: ${text}`);
   });
 
-  const solo = { userId: "u1", tokenId: "tok-1", plan: "pro" };
+  const solo = { userId: "u1", tokenId: "tok-1", plan: "pro", canCreateProject: false };
   assert.deepEqual(await verifyToken(`Bearer ${token}`), solo);
   // The bare token works too, not just the Authorization-header form.
   assert.deepEqual(await verifyToken(token), solo);

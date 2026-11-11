@@ -84,22 +84,24 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
           // training data with a brain sitting one call away. Each line names
           // the moment, because a moment is what an agent can act on.
           instructions:
-            "mozg holds project-specific knowledge brains — material that is " +
-            "newer than your training data and scored against an exam.\n" +
+            "svod holds project bases (your project's map, modules, entrypoints, decisions, " +
+            "known problems — direct-written, no review) and thematic bases (shared recipes — " +
+            "proposals reviewed before they answer).\n" +
             "- Call brain_list once at the start of a session.\n" +
-            "- Call brain_brief on a brain before your first search in it: it " +
-            "returns the vocabulary to search with, the gaps not to trust, and " +
-            "any unfinished work left by an earlier session.\n" +
+            "- Call brain_brief on a base before your first search in it: it " +
+            "returns the vocabulary to search with and the token grant.\n" +
             "- Call brain_search BEFORE answering whenever the question touches " +
             "this project's conventions, file layout, versions, APIs, or any " +
-            "\"how do we do X here\" — your training data does not know these " +
-            "and will sound confident anyway. Skip it for general programming " +
-            "questions the brain has no stake in.\n" +
-            "- Call brain_write after working something out that cost real " +
-            "effort to find and would cost the next session the same. On brains " +
-            "you only read, this becomes a proposal for the owner — still worth " +
-            "sending.\n" +
-            "- Call brain_handoff to leave working state when you stop mid-task.",
+            "\"how do we do X here\" — search the project base first, then supplement " +
+            "from allowed thematic bases. Skip it for general programming " +
+            "questions no base has a stake in.\n" +
+            "- For project map updates use project_note_create / project_note_update " +
+            "(read+direct-write on a project base, no review, ID preserved). " +
+            "Without write access, keep the prepared Markdown in your reply to the user.\n" +
+            "- For shared recipes use brain_write / brain_write_batch (new notes) or " +
+            "brain_propose_edit (edits): token-attributed pending proposals that answer " +
+            "nobody until a reviewer approves. Still worth sending.\n" +
+            "- Create a project base with brain_create (stable project_id + create-project grant).",
         },
       };
 

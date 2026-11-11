@@ -21,9 +21,11 @@ export default async function StarBanner() {
 
   let stars: number | null = null;
   try {
+    // Bounded: sign-in renders offline instead of hanging on GitHub.
     const res = await fetch(`https://api.github.com/repos/${REPO}`, {
       headers: { accept: "application/vnd.github+json" },
       next: { revalidate: 3600 },
+      signal: AbortSignal.timeout(3000),
     });
     if (res.ok) stars = ((await res.json()) as { stargazers_count?: number }).stargazers_count ?? null;
   } catch {

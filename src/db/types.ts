@@ -53,6 +53,10 @@ export interface Brain {
   /** What this brain is: a knowledge pack, or a reproducible style. See 0069 —
    *  it selects the extraction prompt and the exam, not just a label. */
   kind: "knowledge" | "style";
+  /** SVOD stage 4: stable external project ID. NULL = general (thematic) base,
+   *  NOT NULL = private project base. Keyed by this, never display title.
+   *  Global unique where not null (0095), immutable after creation. */
+  project_id: string | null;
   note_count: number;
   source_count: number;
   /** 0 means free. Access to a paid brain is bought once, from balance. */
@@ -152,6 +156,22 @@ export interface Note {
   /** Feedback-driven ranking multiplier, clamped 0.5-2.0; see note-weight.ts. */
   weight: number;
   created_at: Date;
+  /** SVOD stage 4: last-updated timestamp, auto-touched on update (0095). */
+  updated_at: Date;
+  /** Monotonic integer revision, bumped on every UPDATE via trigger (0095).
+   *  Authority for stale detection (timestamps lose precision in node-pg). */
+  revision: number;
+  /** SVOD stage 4: edit-proposal target (active note being edited).
+   *  NULL = new-note proposal / ordinary note. Same-brain enforced natively
+   *  via composite FK (brain_id, target_note_id). */
+  target_note_id: string | null;
+  /** Target.revision at proposal time, for exact stale-target detection. */
+  target_revision: number | null;
+  /** Source token that created this note/proposal. Survives soft revocation
+   *  (FK SET NULL only on hard delete); revoked rows still join for display. */
+  token_id: string | null;
+  /** Token that last updated a project note (direct-write). Same survival. */
+  updated_token_id: string | null;
 }
 
 export interface Folder {
@@ -246,6 +266,20 @@ export interface McpToken {
   last_used_at: Date | null;
   revoked_at: Date | null;
   created_at: Date;
+  /** SVOD stage 4: separate default-off project-creation capability (0095). */
+  can_create_project: boolean;
+}
+
+/** SVOD stage 4 per-token per-brain grant (0095). Default deny: no row = no access. */
+export type TokenCapability = "read" | "propose" | "write";
+
+export interface McpTokenScope {
+  id: string;
+  token_id: string;
+  brain_id: string;
+  capability: TokenCapability;
+  granted_by: string | null;
+  granted_at: Date;
 }
 
 /** A masked secret-scan hit. `sample` is already redacted — never store raw. */

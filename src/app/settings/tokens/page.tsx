@@ -5,14 +5,17 @@ import { redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { Section, Rows, Row } from "@/components/ui";
 import TokenForm from "./TokenForm";
+import TokenScopesForm from "./TokenScopesForm";
 import IchiTokenForm from "./IchiTokenForm";
 import { query } from "@/db";
-import type { McpToken } from "@/db/types";
+import type { McpToken, McpTokenScope } from "@/db/types";
 import { currentUser } from "@/lib/session";
 import { quotaRemaining } from "@/lib/tokens";
 import { listIchiTokens } from "@/lib/ichi-tokens";
 import { revoke, revokeIchi } from "./actions";
 import ConfirmForm from "@/components/ConfirmForm";
+import { listAccessibleBrains, isOperatorEmail } from "@/lib/svod-access";
+import { grantableCapabilities } from "@/lib/svod-token-scopes";
 
 export const dynamic = "force-dynamic";
 
@@ -21,19 +24,6 @@ export async function generateMetadata() {
   return { title: t("Tokens — mozg") };
 }
 
-/**
- * One page for both products' credentials.
- *
- * Tabs are links with a query parameter, not client state: this is a page a
- * person lands on from a doc or a chat message, and `?t=ichi` is a thing they
- * can be sent. It also means the tabs work with no JavaScript, which is the
- * same bargain the rest of this site makes.
- *
- * The two kinds stay separate credentials on purpose — one token reaching both
- * your project knowledge and your ichi's memory is a wider blast radius than
- * the convenience is worth — but they are managed in one place, because a
- * person revoking access should not have to remember which product owns what.
- */
 type Tab = "mozg" | "ichi";
 
 export default async function TokensPage({
@@ -46,8 +36,6 @@ export default async function TokensPage({
   const user = await currentUser();
   if (!user) redirect("/sign-in?next=/settings/tokens");
 
-  // ?t= is the tab, not the translator. Renamed on the way in so the two
-  // cannot be confused by the next person or by scripts/i18n-wrap.ts.
   const { t: tabParam } = await searchParams;
   const tab: Tab = tabParam === "ichi" ? "ichi" : "mozg";
 
@@ -76,6 +64,40 @@ export default async function TokensPage({
     fontSize: ".8125rem",
   });
 
+  // Scoped creation options: admin may grant any base; ordinary issuers only
+  // their current membership with allowed capabilities.
+  let scopeBases: { id: string; title: string; slug: string; project_id: string | null; allowed: ("read" | "propose" | "write")[] }[] = [];
+  let scopesByToken = new Map<string, McpTokenScope[]>();
+  if (tab === "mozg") {
+    const op = isOperatorEmail(user.email);
+    const accessible = await listAccessibleBrains(user.id);
+    let all: typeof accessible = accessible;
+    if (op) {
+      all = await query<(typeof accessible)[number]>(
+        `select b.*, u.handle as owner_handle,
+                case when b.owner_id = $1 then 'owner' else coalesce(m.role, 'owner') end as member_role
+           from brains b join "user" u on u.id = b.owner_id
+           left join brain_members m on m.brain_id = b.id and m.user_id = $1
+          order by b.updated_at desc`,
+        [user.id],
+      );
+    }
+    scopeBases = [];
+    for (const b of all) {
+      const g = await grantableCapabilities(b.id, user.id);
+      if (!g.ok || !g.allowed.length) continue;
+      scopeBases.push({ id: b.id, title: b.title, slug: b.slug, project_id: (b as { project_id?: string | null }).project_id ?? null, allowed: g.allowed });
+    }
+    if (tokens.length) {
+      const rows = await query<McpTokenScope>(
+        `select * from mcp_token_scopes where token_id = any($1::uuid[])`,
+        [tokens.map((x) => x.id)],
+      );
+      scopesByToken = new Map();
+      for (const r of rows) scopesByToken.set(r.token_id, [...(scopesByToken.get(r.token_id) ?? []), r]);
+    }
+  }
+
   return (
     <AppShell
       active="/settings/tokens"
@@ -99,10 +121,10 @@ export default async function TokensPage({
           <>
             <div>
               <p className="lede">
-                {markup(t("One token per machine. Each token can reach every brain you own or have been given access to. Revoking one takes effect on the next call. <0>Usage</0> shows where the calls went."), [
+                {markup(t("One token per machine, scoped to chosen bases: read, read+propose, and for project bases read+direct-write. Default deny — unscoped tokens and OAuth stay denied until granted. Revoking takes effect on the next call. <0>Usage</0> shows where the calls went."), [
                 <Link href="/settings/usage" key="s0" />,
               ])}</p>
-              <TokenForm />
+              <TokenForm bases={scopeBases} />
             </div>
 
             {tokens.length > 0 && (
@@ -118,7 +140,7 @@ export default async function TokensPage({
                           ? fill(t("last used <0/>"), [
                               new Date(token.last_used_at).toISOString().slice(0, 10),
                             ])
-                          : "never used"
+                          : t("never used")
                       }
                       side={
                         <ConfirmForm
@@ -136,6 +158,19 @@ export default async function TokensPage({
                     />
                   ))}
                 </Rows>
+                <div style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}>
+                  {tokens.map((token) => (
+                    <TokenScopesForm
+                      key={token.id}
+                      token={token}
+                      bases={scopeBases}
+                      scopes={scopesByToken.get(token.id) ?? []}
+                    />
+                  ))}
+                </div>
+                <p className="mono" style={{ fontSize: ".6875rem", color: "var(--ink-2)" }}>
+                  {t("Secrets show once at creation and are never stored in plaintext.")}
+                </p>
               </Section>
             )}
           </>
@@ -162,7 +197,7 @@ export default async function TokensPage({
                           ? fill(t("last used <0/>"), [
                               new Date(token.last_used_at).toISOString().slice(0, 10),
                             ])
-                          : "never used"
+                          : t("never used")
                       }
                       side={
                         <ConfirmForm

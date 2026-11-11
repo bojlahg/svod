@@ -5,6 +5,7 @@ import { useT } from "@/lib/t-client";
 import { MARKDOWN_HELP_EXAMPLES } from "@/lib/svod-markdown";
 import SvodMarkdown from "@/components/SvodMarkdown";
 import { createSvodNoteAction, editSvodNoteAction } from "@/app/brains/[slug]/svod-actions";
+import { useSvodWorkspaceSubmit } from "./svod-forms";
 
 /**
  * SVOD stage 3 Markdown editor: collapsible syntax help (5 examples), live
@@ -36,15 +37,38 @@ export default function SvodEditor({
   const [showPreview, setShowPreview] = useState(true);
   const [targetFolder, setTargetFolder] = useState<string>(folderId ?? "");
 
+  // Native/SSR fallback: named title/body inputs already carry the DOM values,
+  // so only fill from state when the posted FormData lacks them (hydrated
+  // controlled inputs without JS edits). Server guards/validation stay intact.
   const save = async (_prev: unknown, formData: FormData) => {
-    formData.set("title", title);
-    formData.set("body", body);
+    if (formData.get("title") === null) formData.set("title", title);
+    if (formData.get("body") === null) formData.set("body", body);
     if (mode === "edit" && noteId) {
       return editSvodNoteAction(formData);
     }
     return createSvodNoteAction(formData);
   };
-  const [state, action, pending] = useActionState(save, null as { error?: string; ok?: boolean; id?: string } | null);
+  const [fallbackState, fallbackAction, fallbackPending] = useActionState(
+    save,
+    null as { error?: string; ok?: boolean; id?: string } | null,
+  );
+  // Hydrated path: ordinary JSON POST to /api/brains/[id]/workspace (no
+  // ServerAction Flight), then router.refresh() only on successful JSON.
+  // Exact title/body/folder state ships via prepare; created note.id is
+  // preserved from JSON; drafts survive failures; busy is guarded.
+  const direct = useSvodWorkspaceSubmit<{ error?: string; ok?: boolean; id?: string }>(
+    brainId,
+    mode === "edit" ? "noteedit" : "notecreate",
+    (fd) => {
+      fd.set("title", title);
+      fd.set("body", body);
+      // Folder comes from controlled state so the exact selection ships even
+      // if the DOM select lags a tick; native fallback already posts it by name.
+      fd.set("folderId", targetFolder);
+    },
+  );
+  const pending = direct.pending || fallbackPending;
+  const state = (direct.result as { error?: string; ok?: boolean; id?: string } | null) ?? fallbackState;
 
   return (
     <div style={{ display: "grid", gap: ".75rem" }}>
@@ -76,15 +100,16 @@ export default function SvodEditor({
         </div>
       </details>
 
-      <form action={action} style={{ display: "grid", gap: ".6rem" }}>
+      <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".6rem" }}>
         <input type="hidden" name="brainId" value={brainId} />
         <input type="hidden" name="slug" value={slug} />
         {noteId ? <input type="hidden" name="noteId" value={noteId} /> : null}
-        <input type="hidden" name="folderId" value={targetFolder} />
+        {mode !== "create" ? <input type="hidden" name="folderId" value={targetFolder} /> : null}
 
         <label style={{ display: "grid", gap: ".3rem", fontSize: ".8125rem", color: "#9aa3af" }}>
           {t("Title")}
           <input
+            name="title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={200}
@@ -106,6 +131,7 @@ export default function SvodEditor({
           <label style={{ display: "grid", gap: ".3rem", fontSize: ".8125rem", color: "#9aa3af" }}>
             {t("Folder")}
             <select
+              name="folderId"
               value={targetFolder}
               onChange={(e) => setTargetFolder(e.target.value)}
               style={{
@@ -130,6 +156,7 @@ export default function SvodEditor({
         <label style={{ display: "grid", gap: ".3rem", fontSize: ".8125rem", color: "#9aa3af" }}>
           {t("Markdown body")}
           <textarea
+            name="body"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={14}

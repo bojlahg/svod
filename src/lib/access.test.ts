@@ -38,6 +38,7 @@ function brain(over: Partial<Brain>): Brain {
     contributions: true,
     cover_key: null,
     kind: "knowledge",
+    project_id: null,
     note_count: 0,
     source_count: 0,
     price_cents: 0,

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { stubDb } from "./test-db";
 import { policyForRole } from "./svod-access";
-import { validateNoteTitle, validateNoteBody, decodeMdBytes, searchSvodNotes } from "./svod-notes";
+import { validateNoteTitle, validateNoteBody, decodeMdBytes, searchSvodNotes, updateSvodNote } from "./svod-notes";
 import { downloadFileParts } from "./svod-download";
 
 /**
@@ -153,6 +153,45 @@ test("writes are atomic: note change + chunk rewrite land in one transaction", a
   assert.match(src, /embedding\)\s*values \([^)]*null\)/);
 });
 
+test("unchanged editor save with lone-CR normalization keeps stored bytes and chunks", async () => {
+  const BRAIN = "11111111-1111-4111-8111-111111111112";
+  const NID = "11111111-1111-4111-8111-111111111113";
+  const CR = "﻿# Note\r\rline one\rline two\rTAIL-CR2B";
+  const SUBMITTED = CR.replace(/\r\n|\r|\n/g, "\r\n");
+  assert.notEqual(SUBMITTED, CR);
+  const seen: string[] = [];
+  stubDb((text) => {
+    seen.push(text);
+    if (/select id, title, body, folder_id from notes/.test(text)) {
+      return [{ id: NID, title: "Note", body: CR, folder_id: null }];
+    }
+    if (/select \* from notes where id = \$1 and brain_id = \$2 and status = 'active'/.test(text)) {
+      return [{ id: NID, brain_id: BRAIN, title: "Note", body: CR, folder_id: null, status: "active" }];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const note = await updateSvodNote({ brainId: BRAIN, noteId: NID, title: "Note", body: SUBMITTED });
+  assert.ok(note);
+  assert.equal(note?.body, CR);
+  assert.equal(note?.body.length, CR.length);
+  assert.ok(!seen.some((s) => /delete from chunks/.test(s)), "no chunk rewrite on normalization-only submit");
+});
+
+test("emoji at the truncation boundary stays encodable and header-safe", () => {
+  const title = "a".repeat(79) + String.fromCodePoint(0x1f600);
+  const id = "11111111-1111-4111-8111-111111111111";
+  const { header, asciiName } = downloadFileParts(title, id);
+  assert.ok(/^[\x20-\x7E]*$/.test(`attachment; filename="${asciiName}"`), "fallback is ASCII");
+  assert.match(header, /filename\*=UTF-8''/);
+  // Whole surrogate pair survives truncation: percent-encoded UTF-8 round-trips.
+  const enc = header.split("filename*=UTF-8''")[1];
+  assert.equal(decodeURIComponent(enc), `${title}.md`);
+  assert.match(enc, /%F0%9F%98%80/);
+  // A real Response validates ByteString headers — this threw URIError before.
+  const res = new Response("x", { headers: { "content-disposition": header } });
+  assert.equal(res.headers.get("content-disposition"), header);
+  assert.ok(!/["\r\n]/.test(asciiName));
+});
 test("Cyrillic download filename is ByteString-safe with encoded filename*", () => {
   const { header, asciiName } = downloadFileParts("Заметка про Луну", "11111111-1111-4111-8111-111111111111");
   assert.ok(/^[\x20-\x7E]*$/.test(`attachment; filename="${asciiName}"`), "fallback is ASCII");

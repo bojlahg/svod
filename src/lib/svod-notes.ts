@@ -29,7 +29,7 @@ export const MAX_NOTE_TITLE = 200;
 export const MAX_NOTE_BODY = 100_000;
 export const MAX_MD_UPLOAD_BYTES = 200 * 1024;
 
-const normForCompare = (s: string): string => s.replace(/\r\n/g, "\n");
+const normForCompare = (s: string): string => s.replace(/\r\n?/g, "\n");
 
 export function validateNoteTitle(raw: unknown): { ok: true; title: string } | { ok: false; error: string } {
   const title = String(raw ?? "").trim().replace(/\s+/g, " ");
@@ -89,9 +89,14 @@ export async function createSvodNote(opts: {
   folderId: string | null;
   title: string;
   body: string;
+  /** Stage 4 token attribution (project direct-write / reviewer creates). */
+  tokenId?: string | null;
+  author?: "human" | "agent";
+  agentClient?: string | null;
 }): Promise<Note> {
   if (!isUuid(opts.brainId)) throw new Error("Base not found.");
   if (opts.folderId && !isUuid(opts.folderId)) throw new Error("Folder is in another base.");
+  if (opts.tokenId && !isUuid(opts.tokenId)) throw new Error("Base not found.");
   if (opts.folderId) {
     const f = await folderInBrain(opts.folderId, opts.brainId);
     if (!f) throw new Error("Folder is in another base.");
@@ -107,10 +112,18 @@ export async function createSvodNote(opts: {
       if (!lock.rowCount) throw new Error("Folder is in another base.");
     }
     const rows = await client.query<Note>(
-      `insert into notes (brain_id, folder_id, title, body, author, status)
-       values ($1, $2, $3, $4, 'human', 'active')
+      `insert into notes (brain_id, folder_id, title, body, author, agent_client, status, token_id, updated_token_id)
+       values ($1, $2, $3, $4, $5, $6, 'active', $7, $7)
        returning *`,
-      [opts.brainId, opts.folderId, opts.title, opts.body],
+      [
+        opts.brainId,
+        opts.folderId,
+        opts.title,
+        opts.body,
+        opts.author ?? "human",
+        opts.agentClient ?? null,
+        opts.tokenId ?? null,
+      ],
     );
     const note = rows.rows[0];
     await insertLexicalChunks(client, opts.brainId, note.id, opts.title, opts.body);
@@ -124,41 +137,78 @@ export async function updateSvodNote(opts: {
   noteId: string;
   title: string;
   body: string;
+  folderId?: string | null;
+  /** Stage 4 token attribution for project direct-writes / reviewer edits. */
+  tokenId?: string | null;
 }): Promise<Note | null> {
   if (!isUuid(opts.brainId) || !isUuid(opts.noteId)) return null;
+  if (opts.folderId && !isUuid(opts.folderId)) throw new Error("Folder is in another base.");
+  if (opts.tokenId && !isUuid(opts.tokenId)) throw new Error("Base not found.");
+  if (opts.folderId) {
+    const f = await folderInBrain(opts.folderId, opts.brainId);
+    if (!f) throw new Error("Folder is in another base.");
+  }
   return tx(async (client) => {
     // Active-only at the boundary: pending proposals are reviewer-only and
-    // proposal editing lands in stage 4.
-    const cur = await client.query<{ id: string; title: string; body: string }>(
-      `select id, title, body from notes
+    // proposal editing lands in stage 4 (reviewer-gated, see svod-proposals).
+    const cur = await client.query<{ id: string; title: string; body: string; folder_id: string | null }>(
+      `select id, title, body, folder_id from notes
         where id = $1 and brain_id = $2 and status = 'active' for update`,
       [opts.noteId, opts.brainId],
     );
     if (!cur.rowCount) return null;
     const current = cur.rows[0];
-    // Textareas normalise CRLF to LF on submit: compare normalised, but keep
-    // the exact stored bytes when the text is unchanged — including title-only
-    // edits. A true no-op touches nothing, so vectors and chunk IDs survive.
+    // HTML forms normalise every newline variant (CR, LF, CRLF) to CRLF on
+    // submit: compare normalised, but keep the exact stored bytes when the text
+    // is unchanged — including title-only edits. A true no-op touches nothing,
+    // so vectors and chunk IDs survive.
     const bodyUnchanged = normForCompare(current.body) === normForCompare(opts.body);
     const titleUnchanged = current.title === opts.title;
-    if (bodyUnchanged && titleUnchanged) {
+    const folderUnchanged = opts.folderId === undefined || (current.folder_id ?? null) === (opts.folderId ?? null);
+    if (bodyUnchanged && titleUnchanged && folderUnchanged && !opts.tokenId) {
       const same = await client.query<Note>(
         `select * from notes where id = $1 and brain_id = $2 and status = 'active'`,
         [opts.noteId, opts.brainId],
       );
       return same.rows[0] ?? null;
     }
+    // No-op content but token attribution requested (project touch): still
+    // stamp updated_token_id/updated_at without rewriting chunks.
+    if (bodyUnchanged && titleUnchanged && folderUnchanged && opts.tokenId) {
+      const rows = await client.query<Note>(
+        `update notes set updated_token_id = $3 where id = $1 and brain_id = $2 and status = 'active' returning *`,
+        [opts.noteId, opts.brainId, opts.tokenId],
+      );
+      return rows.rows[0] ?? null;
+    }
     const nextBody = bodyUnchanged ? current.body : opts.body;
+    const nextFolder = opts.folderId === undefined ? current.folder_id : opts.folderId;
+    if (nextFolder) {
+      const lock = await client.query(`select id from folders where id = $1 and brain_id = $2 for update`, [
+        nextFolder,
+        opts.brainId,
+      ]);
+      if (!lock.rowCount) throw new Error("Folder is in another base.");
+    }
     const rows = await client.query<Note>(
-      `update notes set title = $3, body = $4 where id = $1 and brain_id = $2 and status = 'active' returning *`,
-      [opts.noteId, opts.brainId, opts.title, nextBody],
+      `update notes set title = $3, body = $4, folder_id = $5, updated_token_id = $6
+        where id = $1 and brain_id = $2 and status = 'active' returning *`,
+      [opts.noteId, opts.brainId, opts.title, nextBody, nextFolder, opts.tokenId ?? null],
     );
     const note = rows.rows[0];
     if (!note) return null;
     // Title and/or body changed → chunks rewritten atomically (old vectors drop
     // with the old chunks; new chunks are lexical-first, embeddings pending).
-    await client.query(`delete from chunks where note_id = $1`, [opts.noteId]);
-    await insertLexicalChunks(client, opts.brainId, opts.noteId, opts.title, nextBody);
+    // Folder-only moves keep chunks (handled here too when body/title unchanged
+    // but folder changed: chunks untouched below? No — folder change alone does
+    // not need chunk rewrite, but rewriting to identical content is harmless
+    // and keeps the "chunks match final content exactly" invariant. To preserve
+    // chunk IDs on pure moves, skip rewrite when only folder changed.
+    const contentChanged = !bodyUnchanged || !titleUnchanged;
+    if (contentChanged) {
+      await client.query(`delete from chunks where note_id = $1`, [opts.noteId]);
+      await insertLexicalChunks(client, opts.brainId, opts.noteId, opts.title, nextBody);
+    }
     await client.query(`update brains set content_changed_at = now() where id = $1`, [opts.brainId]);
     return note;
   });
@@ -302,4 +352,64 @@ export async function getPendingSvodNote(
     `select * from notes where id = $1 and brain_id = $2 and status = 'pending'`,
     [noteId, brainId],
   );
+}
+
+/**
+ * SVOD stage 4 project direct-write: trusted distinct path from proposals.
+ *
+ * - Base classification comes from DB (brains.project_id), never caller input:
+ *   a general base is denied even with a forged write flag.
+ * - Exact text preserved (BOM/CRLF/whitespace/fences, file links untouched);
+ *   NUL rejected. Immediately readable after save (active + lexical chunks in
+ *   the same transaction; embeddings NULL for stage 5).
+ * - Reuses Stage 3 chunk operations safely (chunksForNote/estimateTokens).
+ * - Token attribution (token_id/updated_token_id) survives soft revocation.
+ */
+export async function createProjectNoteDirect(opts: {
+  brainId: string;
+  folderId: string | null;
+  title: string;
+  body: string;
+  tokenId: string;
+}): Promise<Note> {
+  if (!isUuid(opts.brainId) || !isUuid(opts.tokenId)) throw new Error("Base not found.");
+  const brain = await maybeOne<{ id: string; project_id: string | null }>(
+    `select id, project_id from brains where id = $1`,
+    [opts.brainId],
+  );
+  if (!brain || !brain.project_id) throw new Error("Direct write is for project bases only.");
+  return createSvodNote({
+    brainId: opts.brainId,
+    folderId: opts.folderId,
+    title: opts.title,
+    body: opts.body,
+    tokenId: opts.tokenId,
+    author: "agent",
+    agentClient: "mcp",
+  });
+}
+
+export async function updateProjectNoteDirect(opts: {
+  brainId: string;
+  noteId: string;
+  title: string;
+  body: string;
+  folderId?: string | null;
+  tokenId: string;
+}): Promise<Note | null> {
+  if (!isUuid(opts.brainId) || !isUuid(opts.noteId) || !isUuid(opts.tokenId)) return null;
+  const brain = await maybeOne<{ id: string; project_id: string | null }>(
+    `select id, project_id from brains where id = $1`,
+    [opts.brainId],
+  );
+  // Trusted: general bases never direct-write, even with a forged scope flag.
+  if (!brain || !brain.project_id) return null;
+  return updateSvodNote({
+    brainId: opts.brainId,
+    noteId: opts.noteId,
+    title: opts.title,
+    body: opts.body,
+    folderId: opts.folderId,
+    tokenId: opts.tokenId,
+  });
 }

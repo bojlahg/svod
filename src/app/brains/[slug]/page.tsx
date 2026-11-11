@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { translator } from "@/lib/t";
+import { fill } from "@/lib/markup";
 import { query } from "@/db";
 import type { Note } from "@/db/types";
 import { currentUser } from "@/lib/session";
@@ -27,7 +28,8 @@ import {
   SvodFolderRenameForm,
   SvodNoteMoveForm,
 } from "./svod-forms";
-import { approveNote, rejectNote } from "./review-actions";
+import { rejectNote } from "./review-actions";
+import ProposalReviewForm from "./proposal-review-form";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,7 @@ interface SearchParams {
   q?: string | string[];
   edit?: string | string[];
   new?: string | string[];
+  pendingPage?: string | string[];
 }
 
 export default async function SvodWorkspacePage({
@@ -82,6 +85,16 @@ export default async function SvodWorkspacePage({
   const creating = firstParam(raw.new) === "1";
   const folderFocusRaw = firstParam(raw.folder).trim();
   const folderFocus = folderFocusRaw || null;
+  const pendingPageRaw = Number(firstParam(raw.pendingPage));
+  // Clamp to a safe supported range BEFORE multiplying for SQL OFFSET:
+  // firstParam takes the first repeated value; non-numeric/negative/overflow
+  // fall back to 0 and large values clamp so OFFSET stays a safe integer.
+  const MAX_PENDING_PAGE = 5000;
+  const pendingPage =
+    Number.isInteger(pendingPageRaw) && pendingPageRaw >= 0
+      ? Math.min(pendingPageRaw, MAX_PENDING_PAGE)
+      : 0;
+  const PENDING_PAGE_SIZE = 20;
 
   const [bases, folders] = await Promise.all([
     listAccessibleBrains(user.id),
@@ -117,11 +130,27 @@ export default async function SvodWorkspacePage({
   ]);
 
   const pendingNotes = canReview
-    ? await query<{ id: string; title: string; created_at: Date }>(
-        `select id, title, created_at from notes
-          where brain_id = $1 and status = 'pending'
-          order by created_at desc limit 20`,
-        [brain.id],
+    ? await query<{
+        id: string;
+        title: string;
+        body: string;
+        created_at: Date;
+        revision: number;
+        target_note_id: string | null;
+        target_revision: number | null;
+        token_id: string | null;
+        proposed_by: string | null;
+        token_prefix: string | null;
+        token_name: string | null;
+      }>(
+        `select n.id, n.title, n.body, n.created_at, n.revision, n.target_note_id, n.target_revision,
+                n.token_id, n.proposed_by,
+                tok.prefix as token_prefix, tok.name as token_name
+           from notes n
+           left join mcp_tokens tok on tok.id = n.token_id
+          where n.brain_id = $1 and n.status = 'pending'
+          order by n.created_at desc limit 20 offset $2`,
+        [brain.id, pendingPage * PENDING_PAGE_SIZE],
       )
     : [];
 
@@ -181,6 +210,89 @@ export default async function SvodWorkspacePage({
     id: f.id,
     label: f.path ? `${f.path} / ${f.name}` : f.name,
   }));
+
+  // Edit-proposal targets (original/current accepted versions) for reviewer diff.
+  // Scoped to THIS proposal base (never expose a target that moved out of scope).
+  const targetIds = [...new Set(pendingNotes.map((p) => p.target_note_id).filter((x): x is string => Boolean(x)))];
+  const targets = targetIds.length
+    ? await query<{ id: string; title: string; body: string; folder_id: string | null; revision: number }>(
+        `select id, title, body, folder_id, revision from notes
+          where id = any($1::uuid[]) and brain_id = $2 and status = 'active'`,
+        [targetIds, brain.id],
+      )
+    : [];
+  const targetById = new Map(targets.map((x) => [x.id, x]));
+
+  // Selected proposal's original, loaded by scoped UUID independently of the
+  // first queue page (older proposals beyond LIMIT 20 still review fully).
+  let selectedTarget: { id: string; title: string; body: string; revision: number } | null = null;
+  let selectedProposalMeta: { token_prefix: string | null; token_name: string | null } | null = null;
+  if (selected && selected.status === "pending" && canReview) {
+    if (selected.target_note_id) {
+      selectedTarget =
+        (await query<{ id: string; title: string; body: string; revision: number }>(
+          `select id, title, body, revision from notes
+            where id = $1 and brain_id = $2 and status = 'active'`,
+          [selected.target_note_id, selected.brain_id],
+        ))[0] ?? null;
+    }
+    const meta = await query<{ token_prefix: string | null; token_name: string | null }>(
+      `select tok.prefix as token_prefix, tok.name as token_name
+         from notes n left join mcp_tokens tok on tok.id = n.token_id
+        where n.id = $1`,
+      [selected.id],
+    );
+    selectedProposalMeta = meta[0] ?? { token_prefix: null, token_name: null };
+  }
+
+  // Transfer attribution for active notes accepted from proposals (same-base
+  // edits and moved edits): title/body unchanged, attribution via history link.
+  let acceptedFrom: {
+    id: string;
+    brain_id: string;
+    brain_title: string | null;
+    target_note_id: string | null;
+    token_prefix: string | null;
+    reason: string | null;
+  } | null = null;
+  if (selected && selected.status === "active") {
+    const rows = await query<{
+      id: string;
+      brain_id: string;
+      brain_title: string | null;
+      target_note_id: string | null;
+      token_prefix: string | null;
+      reason: string | null;
+    }>(
+      `select p.id, p.brain_id, b.title as brain_title, p.target_note_id,
+              tok.prefix as token_prefix, p.superseded_reason as reason
+         from notes p
+         left join brains b on b.id = p.brain_id
+         left join mcp_tokens tok on tok.id = p.token_id
+        where p.superseded_by = $1 and p.status = 'superseded'
+        order by p.created_at desc limit 1`,
+      [selected.id],
+    );
+    acceptedFrom = rows[0] ?? null;
+  }
+
+  // Destination candidates for reviewer moves: bases they can review on both ends.
+  const reviewableBases = canReview ? bases.filter(() => true).slice(0, 30) : [];
+  // Folders per destination base for the visible folder selector (cross-base
+  // moves default to destination root; stale source folders are reset).
+  const foldersByBrain: Record<string, { id: string; label: string }[]> = {
+    [brain.id]: moveFolders,
+  };
+  if (canReview && reviewableBases.length > 1) {
+    const others = reviewableBases.filter((b) => b.id !== brain.id).slice(0, 10);
+    const fetched = await Promise.all(
+      others.map(async (b) => {
+        const fs = await listFolders(b.id);
+        return [b.id, fs.map((f) => ({ id: f.id, label: folderPath(fs, f.parent_id) ? `${folderPath(fs, f.parent_id)} / ${f.name}` : f.name }))] as const;
+      }),
+    );
+    for (const [bid, list] of fetched) foldersByBrain[bid] = list;
+  }
 
   return (
     <div className="svod">
@@ -331,36 +443,54 @@ export default async function SvodWorkspacePage({
             ),
           )}
 
-          {canReview && pendingNotes.length > 0 && (
+          {canReview && (pendingCountRow > 0) && (
             <section style={{ marginTop: "1rem" }} aria-label={t("Pending review")}>
               <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", margin: "0 0 .4rem" }}>
                 {t("Pending review")} · {pendingCountRow}
+                {pendingCountRow > PENDING_PAGE_SIZE ? ` · ${t("page")} ${pendingPage + 1}` : ""}
               </p>
-              <div style={{ display: "grid", gap: ".4rem" }}>
-                {pendingNotes.map((p) => (
-                  <div key={p.id} className="svod-pending">
-                    <Link href={`${baseHref}?note=${p.id}`} className="svod-note-link">
-                      {p.title}
-                    </Link>
-                    <div style={{ display: "flex", gap: ".4rem", marginTop: ".3rem" }}>
-                      <form action={approveNote}>
-                        <input type="hidden" name="id" value={p.id} />
-                        <input type="hidden" name="slug" value={brain.slug} />
-                        <button className="svod-btn-ghost" type="submit">
-                          {t("Approve")}
-                        </button>
-                      </form>
-                      <form action={rejectNote}>
-                        <input type="hidden" name="id" value={p.id} />
-                        <input type="hidden" name="slug" value={brain.slug} />
-                        <button className="svod-btn-ghost" type="submit">
-                          {t("Reject")}
-                        </button>
-                      </form>
+              <div style={{ display: "grid", gap: ".3rem" }}>
+                {pendingNotes.map((p) => {
+                  const target = p.target_note_id ? targetById.get(p.target_note_id) : null;
+                  const active = selectedId === p.id;
+                  return (
+                    <div key={p.id} className="svod-note-row" data-active={active ? "true" : undefined}>
+                      <Link
+                        href={`${baseHref}?note=${p.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${pendingPage ? `&pendingPage=${pendingPage}` : ""}`}
+                        aria-current={active ? "page" : undefined}
+                        className="svod-note-link"
+                      >
+                        {p.title}
+                      </Link>
+                      <span className="mono" style={{ display: "block", fontSize: ".625rem", color: "#9aa3af" }}>
+                        {target ? `${t("edit of")} ${target.title.slice(0, 40)} · ` : `${t("new note")} · `}
+                        {t("rev")} {p.revision}
+                        {p.token_prefix ? ` · ${p.token_prefix}…` : ""}
+                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+              {pendingCountRow > PENDING_PAGE_SIZE && (
+                <div style={{ display: "flex", gap: ".5rem", marginTop: ".5rem" }}>
+                  {pendingPage > 0 && (
+                    <Link
+                      className="svod-btn-ghost"
+                      href={`${baseHref}?pendingPage=${pendingPage - 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+                    >
+                      {t("Newer")}
+                    </Link>
+                  )}
+                  {(pendingPage + 1) * PENDING_PAGE_SIZE < pendingCountRow && (
+                    <Link
+                      className="svod-btn-ghost"
+                      href={`${baseHref}?pendingPage=${pendingPage + 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+                    >
+                      {t("Older")}
+                    </Link>
+                  )}
+                </div>
+              )}
             </section>
           )}
         </nav>
@@ -435,22 +565,97 @@ export default async function SvodWorkspacePage({
                       </>
                     )}
                     {canReview && selected.status === "pending" && (
-                      <div style={{ display: "flex", gap: ".4rem" }}>
-                        <form action={approveNote}>
-                          <input type="hidden" name="id" value={selected.id} />
-                          <input type="hidden" name="slug" value={brain.slug} />
-                          <button className="svod-btn" type="submit">
-                            {t("Approve")}
-                          </button>
-                        </form>
-                        <form action={rejectNote}>
-                          <input type="hidden" name="id" value={selected.id} />
-                          <input type="hidden" name="slug" value={brain.slug} />
-                          <button className="svod-btn-ghost" type="submit">
-                            {t("Reject")}
-                          </button>
-                        </form>
-                      </div>
+                      <section style={{ marginTop: "1.5rem", display: "grid", gap: ".75rem" }} aria-label={t("Proposal review")}>
+                        <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", margin: 0 }}>
+                          {selectedProposalMeta?.token_prefix
+                            ? `${t("via token")} ${selectedProposalMeta.token_prefix}…`
+                            : t("via web")}
+                          {` · ${t("rev")} ${selected.revision}`}
+                          {selected.target_note_id
+                            ? ` · target ${selected.target_note_id.slice(0, 8)} · ${t("base revision")} ${selected.target_revision ?? "—"}`
+                            : ` · ${t("new note")}`}
+                        </p>
+                        {selected.target_note_id ? (
+                          selectedTarget ? (
+                            <div style={{ display: "grid", gap: ".6rem" }}>
+                              <div>
+                                <h3 className="svod-h3">{t("Current accepted (full)")}</h3>
+                                <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af" }}>
+                                  {selectedTarget.title} · {t("rev")} {selectedTarget.revision}
+                                </p>
+                                <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid #2a2e35", borderRadius: 6, padding: ".6rem .8rem" }}>
+                                  <SvodMarkdown body={selectedTarget.body} />
+                                </div>
+                                <details style={{ marginTop: ".4rem" }}>
+                                  <summary className="mono" style={{ fontSize: ".6875rem", cursor: "pointer" }}>
+                                    {t("Show exact source")}
+                                  </summary>
+                                  <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{`${selectedTarget.title}\n\n${selectedTarget.body}`}</pre>
+                                </details>
+                              </div>
+                              <div>
+                                <h3 className="svod-h3">{t("Proposed (full)")}</h3>
+                                <div style={{ maxHeight: 320, overflow: "auto", border: "1px dashed #4b5563", borderRadius: 6, padding: ".6rem .8rem" }}>
+                                  <SvodMarkdown body={selected.body} />
+                                </div>
+                                <details style={{ marginTop: ".4rem" }}>
+                                  <summary className="mono" style={{ fontSize: ".6875rem", cursor: "pointer" }}>
+                                    {t("Show exact proposal")}
+                                  </summary>
+                                  <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{`${selected.title}\n\n${selected.body}`}</pre>
+                                </details>
+                              </div>
+                            </div>
+                          ) : (
+                            <p role="alert" className="mono" style={{ fontSize: ".75rem", color: "#f87171" }}>
+                              {t("The original note is no longer available in this base.")}
+                            </p>
+                          )
+                        ) : (
+                          <div>
+                            <h3 className="svod-h3">{t("Proposed new note (full)")}</h3>
+                            <div style={{ maxHeight: 320, overflow: "auto", border: "1px dashed #4b5563", borderRadius: 6, padding: ".6rem .8rem" }}>
+                              <SvodMarkdown body={selected.body} />
+                            </div>
+                          </div>
+                        )}
+                        <ProposalReviewForm
+                          key={selected.id}
+                          proposalId={selected.id}
+                          slug={brain.slug}
+                          initialTitle={selected.title}
+                          initialBody={selected.body}
+                          foldersByBrain={foldersByBrain}
+                          bases={reviewableBases.map((b) => ({ id: b.id, title: b.title }))}
+                          currentBrainId={brain.id}
+                          proposalRevision={selected.revision}
+                          targetRevision={selected.target_note_id ? (selectedTarget?.revision ?? selected.target_revision) : null}
+                          expectedSourceBrainId={selected.brain_id}
+                        />
+                        <div style={{ display: "flex", gap: ".4rem" }}>
+                          <form action={rejectNote}>
+                            <input type="hidden" name="id" value={selected.id} />
+                            <input type="hidden" name="slug" value={brain.slug} />
+                            <button className="svod-btn-ghost" type="submit">
+                              {t("Reject (keeps content)")}
+                            </button>
+                          </form>
+                        </div>
+                      </section>
+                    )}
+                    {selected.status === "active" && acceptedFrom && (
+                      <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", marginTop: ".75rem" }}>
+                        {acceptedFrom.target_note_id
+                          ? fill(t("Accepted from proposal <0/> (target <1/>)<2/>"), [
+                              acceptedFrom.id.slice(0, 8),
+                              acceptedFrom.target_note_id.slice(0, 8),
+                              acceptedFrom.brain_id !== selected.brain_id
+                                ? ` · ${t("moved from")} ${acceptedFrom.brain_title ?? acceptedFrom.brain_id.slice(0, 8)}`
+                                : "",
+                            ])
+                          : fill(t("Accepted from proposal <0/>"), [acceptedFrom.id.slice(0, 8)])}
+                        {acceptedFrom.token_prefix ? ` · ${t("via token")} ${acceptedFrom.token_prefix}…` : ""}
+                      </p>
                     )}
                   </div>
                 </>

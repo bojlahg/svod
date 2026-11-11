@@ -23,14 +23,18 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function issueToken(userId: string, name?: string): Promise<IssuedToken> {
+export async function issueToken(
+  userId: string,
+  name?: string,
+  opts?: { canCreateProject?: boolean },
+): Promise<IssuedToken> {
   const token = PREFIX + randomBytes(24).toString("base64url");
   const prefix = token.slice(0, 12);
 
   const row = await maybeOne<{ id: string }>(
-    `insert into mcp_tokens (user_id, token_hash, prefix, name)
-     values ($1, $2, $3, $4) returning id`,
-    [userId, hashToken(token), prefix, name ?? null],
+    `insert into mcp_tokens (user_id, token_hash, prefix, name, can_create_project)
+     values ($1, $2, $3, $4, $5) returning id`,
+    [userId, hashToken(token), prefix, name ?? null, opts?.canCreateProject === true],
   );
 
   return { token, id: row!.id, prefix };
@@ -40,6 +44,8 @@ export interface TokenOwner {
   userId: string;
   tokenId: string;
   plan: Plan;
+  /** SVOD stage 4: separate default-off project-creation capability. */
+  canCreateProject: boolean;
 }
 
 /** Resolve a bearer token to its owner, or null. Also stamps last_used_at. */
@@ -55,8 +61,9 @@ export async function verifyToken(raw: string | null): Promise<TokenOwner | null
     token_hash: string;
     plan: Plan;
     paid_until: Date | null;
+    can_create_project: boolean;
   }>(
-    `select t.id, t.user_id, t.token_hash, u.plan, u.paid_until
+    `select t.id, t.user_id, t.token_hash, t.can_create_project, u.plan, u.paid_until
        from mcp_tokens t
        join "user" u on u.id = t.user_id
       where t.token_hash = $1 and t.revoked_at is null`,
@@ -77,7 +84,13 @@ export async function verifyToken(raw: string | null): Promise<TokenOwner | null
 
   // The plan in force, not the plan on the row: an expired paid plan reads
   // as free, so a lapsed month tightens the quota instead of riding on.
-  return { userId: row.user_id, tokenId: row.id, plan: effectivePlan(row.plan, row.paid_until) };
+  // Stage 4: can_create_project rides with the token (default-off, live).
+  return {
+    userId: row.user_id,
+    tokenId: row.id,
+    plan: effectivePlan(row.plan, row.paid_until),
+    canCreateProject: row.can_create_project === true,
+  };
 }
 
 /**
@@ -88,6 +101,10 @@ export async function verifyToken(raw: string | null): Promise<TokenOwner | null
  * `select plan`, which quietly skipped effectivePlan: an OAuth caller whose
  * paid month had ended kept the paid quota until someone noticed. One place
  * that knows how to answer "who is this and what do they get".
+ *
+ * SVOD stage 4: OAuth has no mcp_tokens row and therefore no scopes and no
+ * create-project grant — it fails closed on every token-scoped route. Callers
+ * must use a scoped bearer token from /settings/tokens.
  */
 export async function tokenOwnerFor(
   userId: string,
@@ -98,7 +115,7 @@ export async function tokenOwnerFor(
     [userId],
   );
   if (!row) return null;
-  return { userId, tokenId, plan: effectivePlan(row.plan, row.paid_until) };
+  return { userId, tokenId, plan: effectivePlan(row.plan, row.paid_until), canCreateProject: false };
 }
 
 export async function revokeToken(userId: string, tokenId: string): Promise<void> {

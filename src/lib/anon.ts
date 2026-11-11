@@ -75,6 +75,7 @@ export function anonOwner(req: Request): AnonOwner {
     userId: ANON_USER_ID,
     tokenId: "anon",
     plan: "free",
+    canCreateProject: false,
     ipHash: callerHash(req),
   };
 }

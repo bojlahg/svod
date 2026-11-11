@@ -7,7 +7,6 @@ import TopBar from "@/components/TopBar";
 import SiteFooter from "@/components/SiteFooter";
 import Contents from "@/components/Contents";
 import { query } from "@/db";
-import { accessForSlug } from "@/lib/access";
 import { isoDate } from "@/lib/dates";
 import { tintFor } from "@/lib/brains";
 
@@ -51,9 +50,17 @@ async function latestExam(brainId: string): Promise<ExamRun | null> {
   return rows[0] ?? null;
 }
 
+/**
+ * SVOD stage 2: the exam badge is visible only to callers who may read the
+ * base. No anonymous access, no public metadata.
+ */
 async function resolve(handle: string, slug: string) {
-  const found = await accessForSlug(handle, slug, null);
-  if (!found?.brain || found.brain.visibility !== "public") return null;
+  const { currentUser } = await import("@/lib/session");
+  const { brainAccessByHandleSlug } = await import("@/lib/svod-access");
+  const user = await currentUser();
+  if (!user) return null;
+  const found = await brainAccessByHandleSlug(handle, slug, user.id);
+  if (!found?.canRead) return null;
   const exam = await latestExam(found.brain.id);
   return { brain: found.brain, exam };
 }
@@ -63,27 +70,8 @@ export async function generateMetadata({
 }: {
   params: Promise<{ handle: string; slug: string }>;
 }): Promise<Metadata> {
-  const { handle, slug } = await params;
-  const resolved = await resolve(handle, slug);
-  if (!resolved) return { title: "mozg" };
-  const { brain, exam } = resolved;
-  const title = exam
-    ? `${brain.title} scored ${exam.score}% on its exam — mozg`
-    : `${brain.title} — exam badge — mozg`;
-  const description = exam
-    ? `An AI agent running on the ${brain.title} brain answered ${exam.score}% of ` +
-      `${exam.questions} exam questions correctly (${isoDate(exam.sat_at)})` +
-      (exam.neg_total > 0
-        ? `, refusing ${exam.neg_passed} of ${exam.neg_total} out-of-scope probes`
-        : "") +
-      `. Graded by an independent judge, not claimed by the author.`
-    : `The ${brain.title} brain has not sat its exam yet.`;
-  return {
-    title,
-    description,
-    openGraph: { title, description, type: "article", url: `/b/${handle}/${slug}/badge` },
-    twitter: { card: "summary_large_image", title, description },
-  };
+  await params;
+  return { title: "svod", robots: { index: false, follow: false } };
 }
 
 export default async function ExamBadgePage({

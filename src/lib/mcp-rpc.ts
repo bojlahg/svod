@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { query, maybeOne } from "@/db";
 import { TOOLS, callTool } from "@/lib/mcp";
 import { reportError } from "@/lib/errors";
-import { quotaRemaining, burstExceeded, type TokenOwner } from "@/lib/tokens";
+import { burstExceeded, type TokenOwner } from "@/lib/tokens";
 import { captureServer } from "@/lib/analytics";
 import { CLOSED } from "@/middleware";
 
@@ -179,9 +179,9 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
         };
       }
 
-      // Anonymous callers are metered per address by the route that let them
-      // in; this ceiling counts one shared user row and would throttle every
-      // anonymous caller in the world together the moment one retried.
+      // SVOD private fork: no paid monthly quota on the private path. The
+      // burst ceiling stays as the abuse guard; anonymous callers are gone
+      // (the public door is retired), so every caller here is authenticated.
       if (!owner.ipHash && (await burstExceeded(owner.userId))) {
         return {
           jsonrpc: "2.0" as const,
@@ -194,25 +194,6 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
                   "Rate limited: more than 60 calls in the last minute. Wait a " +
                   "moment before searching again, and prefer fewer, more specific " +
                   "queries over many broad ones.",
-              },
-            ],
-            isError: true,
-          },
-        };
-      }
-
-      const remaining = owner.ipHash ? 1 : await quotaRemaining(owner.userId, owner.plan);
-      if (remaining <= 0) {
-        return {
-          jsonrpc: "2.0" as const,
-          id,
-          result: {
-            content: [
-              {
-                type: "text",
-                text:
-                  `Monthly call quota reached on the ${owner.plan} plan. ` +
-                  "Tell the user to upgrade at mozg.sh/settings.",
               },
             ],
             isError: true,

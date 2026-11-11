@@ -40,7 +40,7 @@ export default function SignInForm({
 }: {
   githubEnabled: boolean;
   googleEnabled: boolean;
-  /** Password sign-up is closed until mail can be sent — see lib/auth.ts. */
+  /** SVOD stage 2: public sign-up is closed — new users are created by the operator. */
   signUpEnabled: boolean;
 }) {
   const router = useRouter();
@@ -210,15 +210,14 @@ export default function SignInForm({
             : t("Already have an account? Sign in")}
         </button>
       ) : (
-        /* Said out loud rather than left as a dead link: without mail we cannot
-           verify an address or reset a password, and an account that can do
-           neither is a trap. */
+        /* SVOD: no public registration. Accounts are created by the
+           administrator; existing credentials keep working. */
         <p
           className="mono"
           style={{ marginTop: "1.25rem", fontSize: ".75rem", color: "var(--ink-3)", maxWidth: "42ch" }}
         >
           {t(
-            "New accounts are created with GitHub while email is being set up — it confirms your address, which is what lets people share brains with you. Passwords cannot be reset yet, so we are not handing out new ones.",
+            "New here? Ask your administrator for an account — public registration is closed.",
           )}
         </p>
       )}

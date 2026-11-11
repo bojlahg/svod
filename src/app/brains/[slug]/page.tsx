@@ -21,8 +21,8 @@ import { runExamNow, addCheck, removeCheck } from "./exam-actions";
 import { retrySource, deleteSource, waiveScan, setCover } from "./source-actions";
 import GapSuggestions from "@/components/GapSuggestions";
 import type { GapKind } from "@/lib/gap-kind";
-import { maybeOne, query } from "@/db";
-import type { Brain, Note, Source } from "@/db/types";
+import { query } from "@/db";
+import type { Note, Source } from "@/db/types";
 import { currentUser } from "@/lib/session";
 import { categoryScores, tintFor } from "@/lib/brains";
 
@@ -34,20 +34,20 @@ const LICENSE_LABEL: Record<string, string> = {
 
 const STATE_SIGIL = { pass: "✓", partial: "▲", fail: "✕", empty: "·" } as const;
 
-/** The tab says which brain you are in — a workspace of five tabs needs it. */
+/** The tab says which base you are in — a workspace of several tabs needs it. */
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const { workspaceBrain } = await import("@/lib/svod-access");
+  const { currentUser } = await import("@/lib/session");
   const user = await currentUser();
-  if (!user) return { title: "mozg" };
-  const brain = await maybeOne<Pick<Brain, "title">>(
-    `select title from brains where owner_id = $1 and slug = $2`,
-    [user.id, slug],
-  );
-  return { title: brain ? `${brain.title} — mozg` : "mozg" };
+  if (!user) return { title: "svod" };
+  const found = await workspaceBrain(slug, user.id);
+  if (!found?.canRead) return { title: "svod" };
+  return { title: `${found.brain.title} — svod` };
 }
 
 export default async function BrainPage({
@@ -61,11 +61,12 @@ export default async function BrainPage({
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const brain = await maybeOne<Brain>(
-    `select * from brains where owner_id = $1 and slug = $2`,
-    [user.id, slug],
-  );
-  if (!brain) notFound();
+  // SVOD: stable ID or owned slug, enforced by the shared policy. Unknown
+  // and ungranted are the same 404.
+  const { workspaceBrain } = await import("@/lib/svod-access");
+  const access = await workspaceBrain(slug, user.id);
+  if (!access?.canRead) notFound();
+  const brain = access.brain;
 
   const [categories, sources, pending, tokenCount, lastRun, recentCalls, history, manualChecks, failedChecks, flags, freshNotes, gapSuggestions, callsWeek] =
     await Promise.all([
@@ -221,7 +222,15 @@ export default async function BrainPage({
             <h1 className="h1">
               {brain.title}
             </h1>
-            <GoalEditor slug={brain.slug} goal={brain.goal} />
+            {access.canEdit ? (
+              <GoalEditor slug={brain.slug} goal={brain.goal} />
+            ) : (
+              brain.goal && (
+                <p style={{ color: "var(--ink-2)", margin: ".6rem 0 0", maxWidth: "60ch" }}>
+                  {brain.goal}
+                </p>
+              )
+            )}
             <p className="mono" style={{ fontSize: ".75rem", color: "var(--ink-3)", marginTop: ".75rem" }}>
               {markup(t("<0/> notes · <1/> sources · <2/>"), [
               brain.note_count,
@@ -575,16 +584,18 @@ export default async function BrainPage({
 
         {/* Above the call log and the gaps: this is configuration, not a
             reading. It changes what every agent is told before it searches. */}
-        <section style={{ marginTop: "3rem" }}>
-          <div className="section-head">
-            <h2 className="h2">{t("Hands for this knowledge")}</h2>
-            <span className="eyebrow">{t("run on the reader's machine, never ours")}</span>
-          </div>
-          <p className="lede">
-            {t("If this brain teaches something a program does better than a person following notes, name it here. Every agent is told before its first search — so it reaches for the tool instead of hand-writing what a machine would have produced.")}
-          </p>
-          <ToolsEditor slug={brain.slug} tools={parseTools(brain.tools)} />
-        </section>
+        {access.canEdit && (
+          <section style={{ marginTop: "3rem" }}>
+            <div className="section-head">
+              <h2 className="h2">{t("Hands for this knowledge")}</h2>
+              <span className="eyebrow">{t("run on the reader's machine, never ours")}</span>
+            </div>
+            <p className="lede">
+              {t("If this brain teaches something a program does better than a person following notes, name it here. Every agent is told before its first search — so it reaches for the tool instead of hand-writing what a machine would have produced.")}
+            </p>
+            <ToolsEditor slug={brain.slug} tools={parseTools(brain.tools)} />
+          </section>
+        )}
 
         <GapSuggestions slug={brain.slug} suggestions={gapSuggestions} />
 
@@ -645,7 +656,9 @@ export default async function BrainPage({
           </section>
         )}
 
-        {pending.length > 0 && (
+        {/* SVOD: pending proposals are visible only to reviewers and above.
+            A reader must not see them. */}
+        {access.canReview && pending.length > 0 && (
           <section style={{ marginTop: "3rem" }}>
             <div
               style={{
@@ -741,10 +754,12 @@ export default async function BrainPage({
             </span>
           </div>
 
-          <div style={{ marginBottom: "1.25rem", display: "grid", gap: ".75rem" }}>
-            <Dropzone brainId={brain.id} />
-            <AddUrls slug={brain.slug} />
-          </div>
+          {access.canEdit && (
+            <div style={{ marginBottom: "1.25rem", display: "grid", gap: ".75rem" }}>
+              <Dropzone brainId={brain.id} />
+              <AddUrls slug={brain.slug} />
+            </div>
+          )}
 
           {sources.length === 0 ? (
             <div className="panel">

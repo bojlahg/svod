@@ -16,12 +16,10 @@ export async function generateMetadata({
 }: {
   params: Promise<{ handle: string; slug: string }>;
 }) {
-  const { handle, slug } = await params;
-  return {
-    title: `What changed — ${handle}/${slug} · mozg`,
-    description:
-      "The verified changelog: every source re-read and every exam re-sat, dated — knowledge deltas proven by the grader, not claimed by a release note.",
-  };
+  // SVOD: no public metadata. Granted readers see the page; everyone else
+  // learns nothing from headers or indexes.
+  await params;
+  return { title: "svod", robots: { index: false, follow: false } };
 }
 
 /**

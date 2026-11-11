@@ -10,10 +10,17 @@ export default function TokenForm() {
   const [state, action, pending] = useActionState(createToken, null);
   const [copied, setCopied] = useState(false);
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3300";
+  // The origin comes from this browser's address bar on first render — never
+  // a baked build-time URL — so the copied command reaches this instance.
+  const [origin] = useState(
+    () =>
+      (typeof window !== "undefined" && window.location.origin) ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3300",
+  );
 
   if (state && "token" in state) {
-    const command = `claude mcp add --transport http mozg ${base}/mcp --header "Authorization: Bearer ${state.token}"`;
+    const command = `claude mcp add --transport http mozg ${origin}/mcp --header "Authorization: Bearer ${state.token}"`;
     return (
       <section className="term" style={{ marginTop: "1.5rem" }}>
         <div className="term-bar">

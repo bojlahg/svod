@@ -9,34 +9,30 @@ import { currentUser } from "@/lib/session";
 import { storage } from "@/lib/storage";
 import { checkFetchableUrl } from "@/lib/url-guard";
 import { rateLimited } from "@/lib/rate-limit";
+import { workspaceBrain, brainAccessById } from "@/lib/svod-access";
 import { enqueueIngest, enqueueCrawl } from "@/worker/queue";
 
-async function ownedSource(sourceId: string, userId: string): Promise<Source | null> {
-  return maybeOne<Source>(
-    `select s.* from sources s
-       join brains b on b.id = s.brain_id
-      where s.id = $1 and b.owner_id = $2`,
-    [sourceId, userId],
-  );
+/**
+ * SVOD source mutations: editors and above only, enforced per action.
+ * A forged source ID from another base resolves its own brain and is denied.
+ */
+async function editableSource(sourceId: string, userId: string): Promise<Source | null> {
+  const source = await maybeOne<Source>(`select * from sources where id = $1`, [sourceId]);
+  if (!source) return null;
+  const access = await brainAccessById(source.brain_id, userId);
+  if (!access?.canEdit) return null;
+  return source;
 }
 
-/**
- * Re-run a source that failed or was rejected. Failures are usually transient
- * (the embedder was down, the model refused, the API rate-limited), so the fix
- * is almost always "try again" rather than "upload it again".
- */
 export async function retrySource(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const source = await ownedSource(String(formData.get("id")), user.id);
+  const source = await editableSource(String(formData.get("id")), user.id);
   if (!source) return;
 
-  // A retry re-reads the whole source through the extraction model on the
-  // platform's bill, so it cannot be a free retry loop either.
   if (await rateLimited(user.id, "ingest-retry", 10)) return;
 
-  // Drop what the previous attempt produced, or a retry would double the notes.
   await query(`delete from notes where source_id = $1`, [source.id]);
   await query(
     `update sources set status = 'queued', error = null, reject_reason = null,
@@ -45,28 +41,19 @@ export async function retrySource(formData: FormData) {
     [source.id],
   );
 
-  // A site source retries its discovery, not an ingest — the crawl skips
-  // pages that are already sources, so re-running it is safe and picks up
-  // whatever the site added since.
   await (isCrawlRoot(source.kind) ? enqueueCrawl(source.id) : enqueueIngest(source.id));
   revalidatePath(`/brains/${String(formData.get("slug"))}`);
 }
 
-/**
- * Add one or more pages by URL, one per line. Docs sites are where most of a
- * brain's material actually lives, and pasting eight links beats saving eight
- * screenshots of the same pages.
- */
 export async function addUrls(_prev: unknown, formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
   const slug = String(formData.get("slug"));
-  const brain = await maybeOne<{ id: string }>(
-    `select id from brains where owner_id = $1 and slug = $2`,
-    [user.id, slug],
-  );
-  if (!brain) return { error: "Brain not found." };
+  // SVOD: the identifier may be an ID (shared) or an owned slug.
+  const access = await workspaceBrain(slug, user.id);
+  if (!access?.canEdit) return { error: "Brain not found." };
+  const brain = access.brain;
 
   const lines = String(formData.get("urls") ?? "")
     .split(/[\n\s]+/)
@@ -76,8 +63,6 @@ export async function addUrls(_prev: unknown, formData: FormData) {
 
   if (!lines.length) return { error: "Paste at least one URL." };
 
-  // Set when the form was opened from a gap suggestion (0043): actually
-  // queueing material for it marks the suggestion accepted.
   const suggestionId = String(formData.get("suggestion") ?? "");
   const acceptSuggestion = async () => {
     if (!suggestionId) return;
@@ -88,15 +73,13 @@ export async function addUrls(_prev: unknown, formData: FormData) {
     );
   };
 
-  // "Learn the whole site": the single URL becomes a crawl root the worker
-  // expands into a source per discovered page. Same path the MCP tool takes.
   if (formData.get("crawl") === "on") {
     if (lines.length > 1) {
       return { error: "Whole-site mode takes one URL — the root of the docs." };
     }
     const check = await checkFetchableUrl(lines[0]);
     if (!check.ok || !check.url) {
-      return { error: `${lines[0].slice(0, 60)} — ${check.reason}` };
+      return { error: `${lines[0].slice(0, 60)} — ${check.reason}.` };
     }
     const site = await one<Source>(
       `insert into sources (brain_id, kind, url, original_name)
@@ -133,16 +116,11 @@ export async function addUrls(_prev: unknown, formData: FormData) {
   return { added: added.length, refused };
 }
 
-/**
- * "These are documentation examples — let this source through the secret
- * scanner." A per-source, owner-only decision (see 0017): the findings stay
- * stored for audit, and the waiver never widens beyond this one source.
- */
 export async function waiveScan(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const source = await ownedSource(String(formData.get("id")), user.id);
+  const source = await editableSource(String(formData.get("id")), user.id);
   if (!source || source.status !== "rejected") return;
 
   await query(
@@ -158,12 +136,9 @@ export async function deleteSource(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const source = await ownedSource(String(formData.get("id")), user.id);
+  const source = await editableSource(String(formData.get("id")), user.id);
   if (!source) return;
 
-  // Notes cascade; the stored object does not, so remove it explicitly. A
-  // failure here must not block the delete — an orphaned blob is cheaper than
-  // a row the user cannot get rid of.
   if (source.storage_key) {
     await storage.del(source.storage_key).catch(() => {});
   }
@@ -172,13 +147,6 @@ export async function deleteSource(formData: FormData) {
   revalidatePath(`/brains/${String(formData.get("slug"))}`);
 }
 
-/**
- * Promote one uploaded image to the brain's cover, or clear it.
- *
- * This is the single door that makes a private upload publicly visible, so it
- * is a deliberate act by the owner and nothing infers it. Only images qualify —
- * a cover is what a buyer judges a style by, and a PDF is not that.
- */
 export async function setCover(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
@@ -188,15 +156,14 @@ export async function setCover(formData: FormData) {
 
   // Clearing takes no source: the empty id is the "remove it" case.
   if (!id) {
-    await query(`update brains set cover_key = null where owner_id = $1 and slug = $2`, [
-      user.id,
-      slug,
-    ]);
+    const access = await workspaceBrain(slug, user.id);
+    if (!access?.canEdit) return;
+    await query(`update brains set cover_key = null where id = $1`, [access.brain.id]);
     revalidatePath(`/brains/${slug}`);
     return;
   }
 
-  const source = await ownedSource(id, user.id);
+  const source = await editableSource(id, user.id);
   if (!source || source.kind !== "image" || !source.storage_key) return;
 
   await query(`update brains set cover_key = $2 where id = $1`, [

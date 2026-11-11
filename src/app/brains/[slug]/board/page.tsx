@@ -3,8 +3,7 @@ import { fill, markup } from "@/lib/markup";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { maybeOne, query } from "@/db";
-import type { Brain } from "@/db/types";
+import { query } from "@/db";
 import { currentUser } from "@/lib/session";
 import { categoryGroups } from "@/lib/notes";
 import { addBoardNote } from "./board-actions";
@@ -35,11 +34,10 @@ export default async function BoardPage({
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const brain = await maybeOne<Brain>(
-    `select * from brains where owner_id = $1 and slug = $2`,
-    [user.id, slug],
-  );
-  if (!brain) notFound();
+  const { workspaceBrain } = await import("@/lib/svod-access");
+  const access = await workspaceBrain(slug, user.id);
+  if (!access?.canRead) notFound();
+  const brain = access.brain;
 
   const [groups, notes, gaps] = await Promise.all([
     categoryGroups(brain.id),
@@ -91,7 +89,7 @@ export default async function BoardPage({
 
   return (
     <AppShell active="/brains">
-      <Link className="eyebrow" href={`/brains/${brain.slug}`}>
+      <Link className="eyebrow" href={`/brains/${slug}`}>
         ← {brain.title}
       </Link>
       <div style={{ display: "flex", alignItems: "baseline", gap: "1rem", flexWrap: "wrap", margin: ".75rem 0 .5rem" }}>
@@ -173,7 +171,7 @@ export default async function BoardPage({
               {(byCategory.get(cat) ?? []).slice(0, 30).map((n) => (
                 <Link
                   key={n.id}
-                  href={`/brains/${brain.slug}/notes?q=${encodeURIComponent(n.title.slice(0, 40))}`}
+                  href={`/brains/${slug}/notes?q=${encodeURIComponent(n.title.slice(0, 40))}`}
                   style={{
                     border: "1px solid var(--rule)",
                     background: "var(--paper)",
@@ -192,18 +190,19 @@ export default async function BoardPage({
                 <Link
                   className="mono"
                   style={{ fontSize: ".75rem", textDecoration: "underline" }}
-                  href={`/brains/${brain.slug}/notes?category=${encodeURIComponent(cat)}`}
+                  href={`/brains/${slug}/notes?category=${encodeURIComponent(cat)}`}
                 >
                   {markup(t("all <0/> →"), [
                   byCategory.get(cat)!.length,
                 ])}</Link>
               )}
 
+              {access.canEdit && (
               <details>
                 <summary className="mono" style={{ fontSize: ".75rem", cursor: "pointer", color: "var(--ink-2)" }}>
                   {t("+ write a card here")}</summary>
                 <form action={addBoardNote} style={{ display: "grid", gap: ".4rem", marginTop: ".5rem" }}>
-                  <input type="hidden" name="slug" value={brain.slug} />
+                  <input type="hidden" name="slug" value={slug} />
                   <input type="hidden" name="category" value={cat} />
                   <input
                     name="title"
@@ -222,6 +221,7 @@ export default async function BoardPage({
                     {t("Pin it")}</button>
                 </form>
               </details>
+              )}
             </div>
           </section>
         ))}

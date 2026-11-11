@@ -1,19 +1,26 @@
 import "./test-env";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Brain, GrantRole } from "@/db/types";
+import type { Brain } from "@/db/types";
 import { accessFor } from "./access";
 import { stubDb } from "./test-db";
 
 const OWNER = "user-owner";
 const STRANGER = "user-stranger";
-const BUYER = "user-buyer";
+const READER = "user-reader";
+const EDITOR = "user-editor";
+const REVIEWER = "user-reviewer";
+
+type MemberRole = "reader" | "editor" | "reviewer";
 
 let brainSeq = 0;
 function brain(over: Partial<Brain>): Brain {
   brainSeq += 1;
+  // Stable resolvers validate UUIDs before touching the database, so
+  // fixtures use real-shaped IDs.
+  const id = `11111111-1111-4111-8111-1111111111${String(brainSeq).padStart(2, "0").slice(-2)}`;
   return {
-    id: `brain-${brainSeq}`,
+    id,
     owner_id: OWNER,
     slug: `brain-${brainSeq}`,
     title: `Brain ${brainSeq}`,
@@ -41,195 +48,88 @@ function brain(over: Partial<Brain>): Brain {
   };
 }
 
-/** Brain table + grants + purchases + pack holdings, enough for accessFor. */
-function stubAccessDb(opts: {
+/**
+ * SVOD stage 2 stub: brains + brain_members + user emails.
+ * No grants, purchases, packs, or visibility backdoors — the policy under
+ * test must not consult them.
+ */
+function stubSvodDb(opts: {
   brains: Brain[];
-  grants?: { brain_id: string; role: GrantRole; user_id: string }[];
-  purchases?: { brain_id: string; buyer_id: string }[];
-  /** Packs this reader holds — bought, or seated on somebody's purchase. */
-  packs?: { pack: string; user_id: string }[];
+  members?: { brain_id: string; user_id: string; role: MemberRole }[];
+  emails?: Record<string, string>;
 }) {
   stubDb((text, params) => {
     if (/select \* from brains where id/.test(text)) {
       const row = opts.brains.find((b) => b.id === params[0]);
       return row ? [row] : [];
     }
-    if (/price_cents from brains where id/.test(text)) {
-      const row = opts.brains.find((b) => b.id === params[0]);
-      return row ? [{ id: row.id, price_cents: row.price_cents }] : [];
+    if (/select email from "user" where id/.test(text)) {
+      const id = params[0] as string;
+      const email = opts.emails?.[id] ?? `${id}@example.test`;
+      return [{ email }];
     }
-    if (/from grants/.test(text)) {
-      // The real query joins on the user's email and requires it verified;
-      // the stub treats every listed grant as verified.
-      const grant = (opts.grants ?? []).find(
-        (g) => g.brain_id === params[0] && g.user_id === params[1],
+    if (/from brain_members where brain_id/.test(text)) {
+      const m = (opts.members ?? []).find(
+        (x) => x.brain_id === params[0] && x.user_id === params[1],
       );
-      return grant ? [{ role: grant.role }] : [];
-    }
-    if (/from pack_purchases/.test(text)) {
-      // holdsAnyPack: does this reader hold any of these packs. The real query
-      // folds "bought it" and "seated on it" into one EXISTS; the stub takes
-      // the answer directly, since which of the two it was does not change
-      // what access.ts does with it.
-      const [userId, packs] = params as [string, string[]];
-      return (opts.packs ?? []).some((h) => h.user_id === userId && packs.includes(h.pack))
-        ? [{ "?column?": 1 }]
-        : [];
-    }
-    if (/select slug from brains where id/.test(text)) {
-      const row = opts.brains.find((b) => b.id === params[0]);
-      return row ? [{ slug: row.slug }] : [];
-    }
-    if (/from purchases/.test(text)) {
-      const [brainIds, buyerId] = params as [string[], string];
-      return (opts.purchases ?? []).some(
-        (p) => p.buyer_id === buyerId && brainIds.includes(p.brain_id),
-      )
-        ? [{ "?column?": 1 }]
-        : [];
+      return m ? [{ role: m.role }] : [];
     }
     throw new Error(`unexpected query: ${text}`);
   });
 }
 
 test("unknown brain resolves to null", async () => {
-  stubAccessDb({ brains: [] });
+  stubSvodDb({ brains: [] });
   assert.equal(await accessFor("brain-missing", OWNER), null);
 });
 
 test("private brain: owner is owner, everyone else gets nothing", async () => {
   const b = brain({ visibility: "private" });
-  stubAccessDb({ brains: [b] });
+  stubSvodDb({ brains: [b] });
 
   assert.deepEqual(await accessFor(b.id, OWNER), { brain: b, access: "owner", preview: false });
   assert.deepEqual(await accessFor(b.id, STRANGER), { brain: b, access: null, preview: false });
   assert.deepEqual(await accessFor(b.id, null), { brain: b, access: null, preview: false });
 });
 
-test("link brain: unlisted users get nothing, same as private", async () => {
-  const b = brain({ visibility: "link" });
-  stubAccessDb({ brains: [b] });
+test("SVOD: public visibility grants nothing without a member row", async () => {
+  const b = brain({ visibility: "public", price_cents: 900 });
+  stubSvodDb({ brains: [b] });
 
+  // A migrated public row must not expose content to strangers or anonymous.
   assert.deepEqual(await accessFor(b.id, STRANGER), { brain: b, access: null, preview: false });
   assert.deepEqual(await accessFor(b.id, null), { brain: b, access: null, preview: false });
+  assert.deepEqual(await accessFor(b.id, OWNER), { brain: b, access: "owner", preview: false });
 });
 
-test("grants beat visibility: a private brain opens for its grantees", async () => {
+test("SVOD: member roles map reader->viewer, editor/reviewer->contributor", async () => {
   const b = brain({ visibility: "private" });
-  stubAccessDb({
+  stubSvodDb({
     brains: [b],
-    grants: [
-      { brain_id: b.id, role: "contributor", user_id: "user-contrib" },
-      { brain_id: b.id, role: "viewer", user_id: "user-viewer" },
+    members: [
+      { brain_id: b.id, user_id: READER, role: "reader" },
+      { brain_id: b.id, user_id: EDITOR, role: "editor" },
+      { brain_id: b.id, user_id: REVIEWER, role: "reviewer" },
     ],
   });
 
-  assert.deepEqual(await accessFor(b.id, "user-contrib"), {
+  assert.deepEqual(await accessFor(b.id, READER), { brain: b, access: "viewer", preview: false });
+  assert.deepEqual(await accessFor(b.id, EDITOR), {
     brain: b,
     access: "contributor",
     preview: false,
   });
-  assert.deepEqual(await accessFor(b.id, "user-viewer"), {
+  assert.deepEqual(await accessFor(b.id, REVIEWER), {
     brain: b,
-    access: "viewer",
+    access: "contributor",
     preview: false,
   });
 });
 
-test("public free brain: anyone is a viewer, even logged out", async () => {
-  const b = brain({ visibility: "public", price_cents: 0 });
-  stubAccessDb({ brains: [b] });
-
-  assert.deepEqual(await accessFor(b.id, STRANGER), { brain: b, access: "viewer", preview: false });
-  assert.deepEqual(await accessFor(b.id, null), { brain: b, access: "viewer", preview: false });
-  assert.deepEqual(await accessFor(b.id, OWNER), { brain: b, access: "owner", preview: false });
-});
-
-test("public paid brain: no purchase means preview, not viewer", async () => {
+test("SVOD: no preview state — ungranted readers get access null, not a storefront", async () => {
   const b = brain({ visibility: "public", price_cents: 900 });
-  stubAccessDb({ brains: [b] });
-
-  assert.deepEqual(await accessFor(b.id, STRANGER), { brain: b, access: null, preview: true });
-  assert.deepEqual(await accessFor(b.id, null), { brain: b, access: null, preview: true });
-  // The owner and grantees never pay for their own brain.
-  assert.deepEqual(await accessFor(b.id, OWNER), { brain: b, access: "owner", preview: false });
-});
-
-test("public paid brain: a buyer is a viewer", async () => {
-  const b = brain({ visibility: "public", price_cents: 900 });
-  stubAccessDb({ brains: [b], purchases: [{ brain_id: b.id, buyer_id: BUYER }] });
-
-  assert.deepEqual(await accessFor(b.id, BUYER), { brain: b, access: "viewer", preview: false });
-});
-
-test("a paid parent covers its free children", async () => {
-  const parent = brain({ visibility: "public", price_cents: 900 });
-  const child = brain({ visibility: "public", price_cents: 0, parent_id: parent.id });
-  stubAccessDb({
-    brains: [parent, child],
-    purchases: [{ brain_id: parent.id, buyer_id: BUYER }],
-  });
-
-  // No purchase: the child is gated by the parent's price.
-  assert.deepEqual(await accessFor(child.id, STRANGER), {
-    brain: child,
-    access: null,
-    preview: true,
-  });
-  // Buying the parent unlocks the child.
-  assert.deepEqual(await accessFor(child.id, BUYER), {
-    brain: child,
-    access: "viewer",
-    preview: false,
-  });
-});
-
-/**
- * The shape a pack sale actually has. The brains belong to whoever wrote them
- * and the buyer owns none of them, so the only thing that can travel is the
- * receipt — and it has to travel to the seats, or a pack bought for a team is
- * a pack one person can read.
- *
- * "igaming" is a real pack slug from lib/packs.ts and "stake-engine" one of
- * its families; if either is renamed without the other, this fails, which is
- * the point of not making the slugs up here.
- */
-test("a pack held opens the brains inside it, and nobody else's", async () => {
-  const parent = brain({ visibility: "public", price_cents: 9900, slug: "stake-engine" });
-  const child = brain({ visibility: "public", price_cents: 0, parent_id: parent.id });
-  stubAccessDb({
-    brains: [parent, child],
-    packs: [
-      { pack: "igaming", user_id: BUYER },
-      // A seat on somebody else's purchase resolves the same way.
-      { pack: "igaming", user_id: "user-colleague" },
-    ],
-  });
-
-  for (const who of [BUYER, "user-colleague"]) {
-    assert.deepEqual(await accessFor(parent.id, who), {
-      brain: parent,
-      access: "viewer",
-      preview: false,
-    });
-    // The family comes with it: the child is gated by the parent's price.
-    assert.deepEqual(await accessFor(child.id, who), {
-      brain: child,
-      access: "viewer",
-      preview: false,
-    });
-  }
-
-  assert.deepEqual(await accessFor(parent.id, STRANGER), {
-    brain: parent,
-    access: null,
-    preview: true,
-  });
-});
-
-test("a pack nobody holds leaves the paywall exactly where it was", async () => {
-  const b = brain({ visibility: "public", price_cents: 9900, slug: "stake-engine" });
-  stubAccessDb({ brains: [b], packs: [{ pack: "igaming", user_id: "someone-else" }] });
-
-  assert.deepEqual(await accessFor(b.id, BUYER), { brain: b, access: null, preview: true });
+  stubSvodDb({ brains: [b] });
+  const found = await accessFor(b.id, STRANGER);
+  assert.equal(found?.preview, false);
+  assert.equal(found?.access, null);
 });

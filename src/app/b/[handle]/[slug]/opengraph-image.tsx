@@ -1,6 +1,5 @@
 import { translator } from "@/lib/t";
 import { ImageResponse } from "next/og";
-import { maybeOne } from "@/db";
 import type { Brain } from "@/db/types";
 import { tintFor } from "@/lib/brains";
 
@@ -43,12 +42,20 @@ export default async function OgImage({
   const t = await translator();
 
   const { handle, slug } = await params;
-  const brain = await maybeOne<Brain & { owner_handle: string }>(
-    `select b.*, u.handle as owner_handle
-       from brains b join "user" u on u.id = b.owner_id
-      where u.handle = $1 and b.slug = $2 and b.visibility = 'public'`,
-    [handle, slug],
-  );
+  // SVOD: no public share cards. Only a caller who may read the base sees
+  // its title — everyone else gets the generic card.
+  let brain: Brain | null = null;
+  try {
+    const { currentUser } = await import("@/lib/session");
+    const { brainAccessByHandleSlug } = await import("@/lib/svod-access");
+    const user = await currentUser();
+    if (user) {
+      const found = await brainAccessByHandleSlug(handle, slug, user.id);
+      brain = found?.canRead ? found.brain : null;
+    }
+  } catch {
+    brain = null;
+  }
 
   const tint = brain ? (RISO[tintFor(brain)] ?? RISO.blue) : RISO.blue;
   const onTint = tint === RISO.yellow || tint === RISO.orange ? INK : PAPER2;

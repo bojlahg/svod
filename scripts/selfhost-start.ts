@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { applyMigrations } from "../src/lib/migrate-runner";
+import { withCredLock, credKeyForUser } from "../src/lib/cred-lock";
 import {
   ensureAdminWithClient,
   validateAdminEnv,
@@ -123,7 +124,20 @@ async function main() {
     );
 
     try {
-      const res = await ensureAdminWithClient(client, adminEmail, adminPassword);
+      // Serialized with sign-in and admin resets for this account (same
+      // per-user advisory lock the auth route and /admin/users hold), so a
+      // rotation at startup cannot interleave with a verify+insert-session.
+      const lookup = await client.query<{ id: string }>(
+        `select id from "user" where lower(email) = lower($1) limit 2`,
+        [adminEmail],
+      );
+      const key =
+        lookup.rows.length === 1
+          ? credKeyForUser(lookup.rows[0].id)
+          : credKeyForUser(`bootstrap:${adminEmail.toLowerCase()}`);
+      const res = await withCredLock(key, () =>
+        ensureAdminWithClient(client, adminEmail, adminPassword),
+      );
       if (res.status === "created") console.log(`[selfhost-start] admin created for ${adminEmail}`);
       else if (res.status === "linked")
         console.log(`[selfhost-start] admin password linked for ${adminEmail}`);

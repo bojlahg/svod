@@ -1,163 +1,73 @@
-import { maybeOne, one, query } from "@/db";
+import { maybeOne } from "@/db";
 import type { Brain } from "@/db/types";
 import type { Access } from "@/lib/access";
-import { packsWith } from "@/lib/packs";
-import { holdsAnyPack } from "@/lib/pack-access";
-import { gateFor, hasPaid } from "@/lib/paywall";
+import { brainAccessById } from "@/lib/svod-access";
 
-/**
- * Free queries a paid brain answers before it asks to be bought. Five is
- * enough to see whether it knows the subject and not enough to work from.
- */
 export const TEASER_CALLS = 5;
 
 export interface Resolved {
   brain: Brain;
   access: Access;
-  /** Set while a paid brain is being read on its free preview. */
+  /** SVOD has no paid previews — never set. Kept for caller compatibility. */
   teaser?: { used: number; limit: number };
-  /** Set when the preview is spent: render the offer, not the content. */
   locked?: boolean;
 }
 
 /**
- * Who may read what, and what to say when they may not.
+ * SVOD stage 2 MCP resolution.
  *
- * Pulled out of lib/mcp.ts because every tool needs it and nothing in it is
- * about any particular tool: resolving a handle, the paid-preview gate, the
- * packs a caller holds, and the two texts a refusal prints. Tool files import
- * this; it imports no tool file, so the direction of the arrows stays
- * readable — which is the whole point of splitting a two-thousand-line file
- * that every feature has to touch.
+ * Same authority as the web: owner, brain_members, env operator. No public
+ * catalogue, no teaser, no paywall, no packs — a migrated public row exposes
+ * nothing without an explicit grant. Accepts a UUID or "handle/slug" or (for
+ * the caller's own bases) a bare slug; bare slugs never resolve across owners.
  */
 
-/** Accepts "design" (own brain) or "someone/design" (shared or public). */
-/** Is this brain inside a pack the caller holds? Mirrors lib/access.ts. */
-async function inHeldPack(
-  brain: Pick<Brain, "slug" | "parent_id">,
-  userId: string,
-): Promise<boolean> {
-  let parentSlug: string | null = null;
-  if (brain.parent_id) {
-    const parent = await maybeOne<{ slug: string }>(
-      `select slug from brains where id = $1`,
-      [brain.parent_id],
-    );
-    parentSlug = parent?.slug ?? null;
-  }
-  const packs = packsWith(brain.slug, parentSlug);
-  return packs.length > 0 && holdsAnyPack(userId, packs);
+async function inHeldPack(): Promise<boolean> {
+  return false;
 }
+
+void inHeldPack;
 
 export async function resolveBrain(
   handle: string,
   userId: string,
 ): Promise<Resolved | null> {
-  const [maybeOwner, maybeSlug] = handle.includes("/")
-    ? handle.split("/", 2)
-    : [null, handle];
+  const trimmed = handle.trim();
+  if (!trimmed) return null;
 
-  let brain = maybeOwner
-    ? await maybeOne<Brain>(
-        `select b.* from brains b join "user" u on u.id = b.owner_id
-          where u.handle = $1 and b.slug = $2`,
-        [maybeOwner, maybeSlug],
-      )
-    : await maybeOne<Brain>(`select * from brains where owner_id = $1 and slug = $2`, [
-        userId,
-        maybeSlug,
-      ]);
-
-  // A bare slug that is not one of the caller's own brains still resolves
-  // when it names EXACTLY ONE brain on their shelf (library, purchases,
-  // grants). "slot-studio" instead of "mozg/slot-studio" was 100% of the
-  // failed MCP calls in a day — agents reach for the name brain_list showed
-  // in a title, and making them re-derive the owner prefix converts a
-  // working question into a retry loop. Ambiguity still errors: guessing
-  // between two same-named brains would answer from the wrong one silently.
-  if (!brain && !maybeOwner) {
-    const shelf = await query<Brain>(
-      `select b.* from brains b
-        where b.slug = $2
-          and (exists (select 1 from library l
-                        where l.brain_id = b.id and l.user_id = $1)
-           or exists (select 1 from purchases p
-                        where p.brain_id = b.id and p.buyer_id = $1)
-           or exists (select 1 from grants g
-                        join "user" u on lower(u.email) = lower(g.email)
-                       where g.brain_id = b.id and u.id = $1 and u."emailVerified"))
-        limit 2`,
-      [userId, maybeSlug],
-    );
-    if (shelf.length === 1) brain = shelf[0];
+  if (trimmed.includes("/")) {
+    const [maybeOwner, maybeSlug] = trimmed.split("/", 2);
+    const { brainAccessByHandleSlug } = await import("@/lib/svod-access");
+    const found = await brainAccessByHandleSlug(maybeOwner, maybeSlug, userId);
+    if (!found || !found.canRead) return null;
+    return { brain: found.brain, access: found.isOperator ? "owner" : toLegacy(found.role) };
   }
 
-  if (!brain) return null;
+  // UUID: the stable shared identifier — direct lookup with a policy check.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+    const found = await brainAccessById(trimmed, userId);
+    if (!found || !found.canRead) return null;
+    return { brain: found.brain, access: found.isOperator ? "owner" : toLegacy(found.role) };
+  }
 
-  if (brain.owner_id === userId) return { brain, access: "owner" };
-
-  // Verified addresses only — see the note in lib/access.ts. An agent must not
-  // be the way around a check the web app enforces.
-  const grant = await maybeOne<{ role: "viewer" | "contributor" }>(
-    `select g.role from grants g join "user" u on lower(u.email) = lower(g.email)
-      where g.brain_id = $1 and u.id = $2 and u."emailVerified"`,
-    [brain.id, userId],
+  // Bare slug: only the caller's own bases, exactly as before — never a guess
+  // across owners.
+  const brain = await maybeOne<Brain>(
+    `select * from brains where owner_id = $1 and slug = $2`,
+    [userId, trimmed],
   );
-  if (grant) return { brain, access: grant.role };
-
-  if (brain.visibility !== "public") return null;
-
-  // A paid brain is not readable over MCP until it is bought, and a price on
-  // a parent covers its children — except for the teaser, which is metered
-  // here, on the same path that enforces the paywall.
-  const gate = await gateFor(brain);
-  // A pack the caller holds satisfies the gate too — bought once, read by
-  // everyone seated on it. This path resolves access itself rather than
-  // calling lib/access.ts (it meters a teaser on the way), so every rule the
-  // web app enforces has to be repeated here or an agent is the way around it.
-  if (gate && !(await hasPaid(gate, userId)) && !(await inHeldPack(brain, userId))) {
-    const { used } = await one<{ used: number }>(
-      `select count(*)::int as used from calls
-        where brain_id = $1 and caller_id = $2
-          and tool in ('brain_search', 'brain_read') and ok`,
-      [brain.id, userId],
-    );
-    if (used >= TEASER_CALLS) return { brain, access: "viewer", locked: true };
-    return { brain, access: "viewer", teaser: { used, limit: TEASER_CALLS } };
-  }
-
-  return { brain, access: "viewer" };
+  if (!brain) return null;
+  return { brain, access: "owner" };
 }
 
-/** The offer a spent teaser renders instead of content. */
+function toLegacy(role: "owner" | "reader" | "editor" | "reviewer" | null): Access {
+  if (role === "owner") return "owner";
+  if (role === "editor" || role === "reviewer") return "contributor";
+  if (role === "reader") return "viewer";
+  return null;
+}
+
+/** SVOD has no paid locks — kept so callers do not branch on a missing import. */
 export async function lockedText(brain: Brain): Promise<string> {
-  const gate = await gateFor(brain);
-  const owner = await maybeOne<{ handle: string | null }>(
-    `select handle from "user" where id = $1`,
-    [brain.owner_id],
-  );
-  const price = gate ? `$${(gate.priceCents / 100).toFixed(2)}` : "a one-time price";
-  // Three things this has to do that a paywall notice usually does not.
-  //
-  // Land one hop from checkout, not on /pricing: the reader is inside a
-  // terminal, and every extra page is a place to stop. The link carries
-  // utm_source, which middleware.ts already banks as first touch, so this is
-  // the first channel in the product whose conversions can be counted at all
-  // — see attribution.ts, which notes that tagging a link is all a per-bucket
-  // reading ever needed.
-  //
-  // Never leave the agent holding nothing. brain_find takes a question rather
-  // than a handle and searches every free brain, so the refusal ends with a
-  // move the agent can make immediately and for free, which is also the best
-  // advertisement the catalogue has.
-  const path = `b/${owner?.handle ?? "…"}/${brain.slug}`;
-  return (
-    `"${brain.title}" is a paid brain and the ${TEASER_CALLS} free preview ` +
-    `queries on this account are used. Buying costs ${price} once, is not a ` +
-    `subscription, and keeps working as the author updates it.\n\n` +
-    `Buy it: https://mozg.sh/${path}?utm_source=mcp-locked\n` +
-    `Free right now, no account: brain_find {"question": "<what you needed>"} ` +
-    `searches every free brain in the catalogue.\n\n` +
-    `Tell the user both lines and do not retry.`
-  );
+  return `Access to "${brain.title}" is not available on this account.`;
 }

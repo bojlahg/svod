@@ -42,11 +42,8 @@ test("the current-page slot is left exactly once, for the page to fill", async (
   assert.equal(hits, 1);
 });
 
-test("the plain-text route fills the slot rather than serving the marker", async () => {
+test("SVOD: the plain-text route is retired with the public surface", async () => {
   const { GET } = await import("@/app/machine.txt/route");
-  const body = await GET().text();
-
-  assert.ok(!body.includes(CURRENT_PAGE_MARKER), "the marker reached a reader");
-  assert.ok(body.includes("# current-page"), "the block it stands for is missing");
-  assert.ok(body.startsWith("mozg-sh"));
+  const res = GET();
+  assert.equal(res.status, 410);
 });

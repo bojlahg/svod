@@ -36,8 +36,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params;
 
   const user = await requireUser(req).catch(() => null);
+  // Unknown and ungranted are the same 404 — the status must not say whether
+  // the base exists.
   if (!user || !(await canRead(id, user.id))) {
-    return new Response("forbidden", { status: 403 });
+    return new Response("not found", { status: 404 });
   }
 
   // Start from the newest row so a viewer sees only calls made while watching.

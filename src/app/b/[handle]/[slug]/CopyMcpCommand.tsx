@@ -8,23 +8,22 @@ import { mintTokenForCopy } from "./token-action";
  * One click puts a WORKING connect command on the clipboard. Signed in, the
  * first press mints a real token (kept in state, so pressing twice does not
  * mint twice) and copies the command with it filled in — copy, paste, done.
- * The person Discord sent here should never have to assemble the command
- * from parts.
+ * The origin comes from this browser's address bar, never a baked URL.
  */
-export default function CopyMcpCommand({
-  signedIn,
-  commandFor,
-}: {
-  signedIn: boolean;
-  /** Builds the full command around a token value. */
-  commandFor: string;
-}) {
+export default function CopyMcpCommand({ signedIn }: { signedIn: boolean }) {
   const t = useT();
 
   const [copied, setCopied] = useState(false);
   const [minted, setMinted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The origin comes from this browser's address bar on first render — never
+  // a baked URL — so the copied command reaches this instance.
+  const [origin] = useState(
+    () =>
+      (typeof window !== "undefined" && window.location.origin) ||
+      "http://localhost:3300",
+  );
 
   const copy = async () => {
     setBusy(true);
@@ -41,7 +40,7 @@ export default function CopyMcpCommand({
         setMinted(token);
       }
       await navigator.clipboard.writeText(
-        commandFor.replace("__TOKEN__", token ?? "YOUR_TOKEN"),
+        `claude mcp add --transport http mozg ${origin}/mcp --header "Authorization: Bearer ${token ?? "YOUR_TOKEN"}"`,
       );
       setCopied(true);
       setTimeout(() => setCopied(false), 3000);

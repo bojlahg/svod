@@ -48,10 +48,19 @@ export async function updateProfile(_prev: unknown, formData: FormData) {
   );
   if (taken.length) return { error: "That handle is taken." };
 
-  await query(
-    `update "user" set name = $2, handle = $3, "updatedAt" = now() where id = $1`,
-    [user.id, parsed.data.name, parsed.data.handle],
-  );
+  // Atomic: the pre-check above races a concurrent claim, so the unique
+  // violation below maps to the same user-facing answer, not a 500.
+  try {
+    await query(
+      `update "user" set name = $2, handle = $3, "updatedAt" = now() where id = $1`,
+      [user.id, parsed.data.name, parsed.data.handle],
+    );
+  } catch (err) {
+    if ((err as { code?: string })?.code === "23505") {
+      return { error: "That handle is taken." };
+    }
+    throw err;
+  }
 
   revalidatePath("/settings");
   return { ok: true as const, handle: parsed.data.handle };

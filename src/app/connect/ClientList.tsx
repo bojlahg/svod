@@ -28,12 +28,21 @@ export default function ClientList({
   const [copied, setCopied] = useState(false);
   // Filled in only when the reader asks for it, and only in their own browser.
   // Signed out, the page is public and the placeholder is the whole point.
+  // The origin always comes from this browser's address bar — never a baked
+  // build-time URL — so a token minted here connects back to this instance.
   const [token, setToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [minting, startMint] = useTransition();
+  // The origin comes from this browser's address bar on first render —
+  // never a baked build-time URL — so a command copied here connects back to
+  // this instance.
+  const [origin] = useState(
+    () =>
+      (typeof window !== "undefined" && `${window.location.origin}/mcp`) || url,
+  );
 
   const client = clients.find((c) => c.id === active) ?? clients[0];
-  const snippet = renderSnippet(client, url, token ?? "YOUR_TOKEN");
+  const snippet = renderSnippet(client, origin, token ?? "YOUR_TOKEN");
 
   async function copy() {
     await navigator.clipboard.writeText(snippet);

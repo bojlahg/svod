@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { query, tx } from "@/db";
-import type { Brain, Source } from "@/db/types";
+import { tx } from "@/db";
+import type { Source } from "@/db/types";
 import { requireUser } from "@/lib/session";
+import { brainAccessById } from "@/lib/svod-access";
 import { storage, storageKey } from "@/lib/storage";
 import { enqueueIngest } from "@/worker/queue";
-import { limitsFor } from "@/lib/plans";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const TEXT_TYPES = new Set([
@@ -16,8 +16,6 @@ const TEXT_TYPES = new Set([
 const PDF_TYPE = "application/pdf";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-// PDFs go to the model whole, and the API caps a request at 32 MB including
-// the base64 overhead. Refusing early beats a confusing failure mid-ingest.
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -29,11 +27,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const { id } = await ctx.params;
-  const brain = await query<Brain>(
-    `select * from brains where id = $1 and owner_id = $2`,
-    [id, user.id],
-  ).then((r) => r[0]);
-  if (!brain) return NextResponse.json({ error: "Brain not found." }, { status: 404 });
+  // Editors and above may upload; readers cannot. Unknown and ungranted are
+  // the same 404 so a forged ID reveals nothing.
+  const access = await brainAccessById(id, user.id);
+  if (!access?.canEdit) {
+    return NextResponse.json({ error: "Brain not found." }, { status: 404 });
+  }
+  const brain = access.brain;
 
   const form = await req.formData();
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
@@ -41,22 +41,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "No files received." }, { status: 400 });
   }
 
-  const limit = limitsFor(user.plan).sources;
-
+  // SVOD: no plan source caps — workspace upload is gated by role only.
   const accepted: Source[] = [];
   const rejected: { name: string; reason: string }[] = [];
 
-  // The limit check and the inserts share one transaction with the brain row
-  // locked: read separately, two parallel uploads would both pass the check
-  // and both exceed the limit.
-  const overLimit = await tx(async (client) => {
-    const locked = await client.query<{ source_count: number }>(
-      `select source_count from brains where id = $1 for update`,
-      [brain.id],
-    );
-    const used = locked.rows[0]?.source_count ?? brain.source_count;
-    if (used + files.length > limit) return true;
-
+  const done = await tx(async (client) => {
     for (const file of files) {
       if (file.size > MAX_BYTES) {
         rejected.push({ name: file.name, reason: "over 20 MB" });
@@ -93,24 +82,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       );
       accepted.push(rows[0]);
     }
-    return false;
+    return true;
   });
+  void done;
 
-  if (overLimit) {
-    return NextResponse.json(
-      {
-        error:
-          `That would exceed ${limit} sources on the ${user.plan} plan ` +
-          `(${brain.source_count} used).`,
-      },
-      { status: 402 },
-    );
-  }
-
-  // Queued after the commit, not inside it: a rolled-back transaction must not
-  // leave a job pointing at a source row that never landed. Queue rather than
-  // process inline: a folder of 40 screenshots would blow through any request
-  // timeout, and the user should see rows appear at once.
   for (const source of accepted) await enqueueIngest(source.id);
 
   return NextResponse.json({

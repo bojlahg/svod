@@ -61,26 +61,21 @@ export async function generateMetadata({
 }: {
   params: Promise<{ handle: string; slug: string }>;
 }): Promise<Metadata> {
+  // SVOD: no public metadata. Anonymous or ungranted callers learn nothing
+  // about the base from headers, cards or indexes.
   const { handle, slug } = await params;
-  const found = await accessForSlug(handle, slug, null);
-  if (!found?.brain || found.brain.visibility !== "public") return { title: "mozg" };
-  const title = `${found.brain.title} — a mozg brain`;
+  const { currentUser } = await import("@/lib/session");
+  const { brainAccessByHandleSlug } = await import("@/lib/svod-access");
+  const user = await currentUser();
+  if (!user) return { title: "svod", robots: { index: false, follow: false } };
+  const found = await brainAccessByHandleSlug(handle, slug, user.id);
+  if (!found?.canRead) return { title: "svod", robots: { index: false, follow: false } };
+  const title = `${found.brain.title} — a svod base`;
   const description = found.brain.goal ?? undefined;
   return {
     title,
     description,
-    openGraph: {
-      title,
-      description,
-      type: "article",
-      // The image is the opengraph-image.tsx in this segment — Next resolves it.
-      url: `/b/${handle}/${slug}`,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-    },
+    robots: { index: false, follow: false },
   };
 }
 
@@ -473,7 +468,7 @@ export default async function PublicBrainPage({
                   <span className="c" key="s0" />,
                 ])}</div>
                 <div style={{ wordBreak: "break-all", paddingLeft: "1.5rem" }}>
-                  {t("https://mozg.sh/mcp --header \"Authorization: Bearer …\"")}</div>
+                  {t("/mcp --header \"Authorization: Bearer …\"")}</div>
                 <div style={{ marginTop: ".9rem" }}>
                   {markup(t("<0>&gt;</0> use <1/>/<2/> — …"), [
                   <span className="u" key="s0" />,
@@ -482,10 +477,7 @@ export default async function PublicBrainPage({
                 ])}</div>
                 <div style={{ display: "flex", gap: ".75rem", alignItems: "center", flexWrap: "wrap" }}>
                   {user ? (
-                    <CopyMcpCommand
-                      signedIn
-                      commandFor={`claude mcp add --transport http mozg ${env.NEXT_PUBLIC_APP_URL}/mcp --header "Authorization: Bearer __TOKEN__"`}
-                    />
+                    <CopyMcpCommand signedIn />
                   ) : (
                     <Link
                       className="btn"

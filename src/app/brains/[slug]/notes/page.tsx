@@ -4,8 +4,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { Section } from "@/components/ui";
-import { maybeOne, query } from "@/db";
-import type { Brain, Note } from "@/db/types";
+import { query } from "@/db";
+import type { Note } from "@/db/types";
 import { currentUser } from "@/lib/session";
 import {
   categoryGroups,
@@ -59,11 +59,12 @@ export default async function NotesPage({
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const brain = await maybeOne<Brain>(
-    `select * from brains where owner_id = $1 and slug = $2`,
-    [user.id, slug],
-  );
-  if (!brain) notFound();
+  // SVOD: shared policy; readers see active notes only, reviewers also see
+  // pending. Unknown and ungranted are the same 404.
+  const { workspaceBrain } = await import("@/lib/svod-access");
+  const access = await workspaceBrain(slug, user.id);
+  if (!access?.canRead) notFound();
+  const brain = access.brain;
 
   const term = q?.trim() ?? "";
   const filtered = Boolean(term || category);
@@ -74,12 +75,12 @@ export default async function NotesPage({
          from notes n
          left join sources s on s.id = n.source_id
         where n.brain_id = $1
-          and n.status in ('active', 'pending')
+          and (n.status = 'active' or ($4 and n.status = 'pending'))
           and ($2 = '' or n.title ilike '%' || $2 || '%' or n.body ilike '%' || $2 || '%')
           and ($3::text is null or coalesce(n.category, 'uncategorised') = $3)
         order by coalesce(n.category, 'uncategorised'), n.status desc, n.created_at desc
         limit 400`,
-      [brain.id, term, category ?? null],
+      [brain.id, term, category ?? null, access.canReview],
     ),
     categoryGroups(brain.id),
     // Whole-brain questions, so they are computed only on the unfiltered view —
@@ -168,7 +169,7 @@ export default async function NotesPage({
           </div>
         </Section>
 
-        {duplicates.length > 0 && (
+        {access.canEdit && duplicates.length > 0 && (
           <Section
             title={t("Saying the same thing twice")}
             aside={fill(
@@ -298,7 +299,7 @@ export default async function NotesPage({
           )}
         </Section>
 
-        {history.length > 0 && (
+        {access.canEdit && history.length > 0 && (
           <Section title={t("What it used to say")} aside={`${history.length} replaced`}>
             <details>
               <summary

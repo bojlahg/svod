@@ -1,6 +1,5 @@
-import { maybeOne, one, query } from "@/db";
+import { one, query } from "@/db";
 import type { Brain } from "@/db/types";
-import { gateFor } from "@/lib/paywall";
 
 /**
  * The reading surface for brains that cost nothing.
@@ -41,16 +40,15 @@ export interface PublicCategory {
   notes: number;
 }
 
-/** The brain, only if everything in it is readable without paying. */
+/** SVOD stage 2: open only to signed-in callers who may read the base. */
 export async function openBrain(handle: string, slug: string): Promise<Brain | null> {
-  const brain = await maybeOne<Brain>(
-    `select b.* from brains b join "user" u on u.id = b.owner_id
-      where u.handle = $1 and b.slug = $2 and b.visibility = 'public'`,
-    [handle, slug],
-  );
-  if (!brain) return null;
-  // A price on the brain or on its family means the notes are what was sold.
-  return (await gateFor(brain)) ? null : brain;
+  const { currentUser } = await import("@/lib/session");
+  const { brainAccessByHandleSlug } = await import("@/lib/svod-access");
+  const user = await currentUser();
+  if (!user) return null;
+  const found = await brainAccessByHandleSlug(handle, slug, user.id);
+  if (!found?.canRead) return null;
+  return found.brain;
 }
 
 export async function categoriesOf(brainId: string): Promise<PublicCategory[]> {

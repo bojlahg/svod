@@ -3,7 +3,7 @@ import { mcp } from "better-auth/plugins";
 // Relative, not "@/..." — the better-auth CLI loads this file outside the
 // Next.js resolver and does not honour tsconfig path aliases.
 import { pool } from "../db";
-import { env, emailReady } from "./env";
+import { env } from "./env";
 import { sendMail } from "./mail";
 import { cookies } from "next/headers";
 import { captureServer } from "./analytics";
@@ -51,17 +51,14 @@ export const auth = betterAuth({
       : {}),
   },
 
-  // Sign-in stays on so anyone who already has a password keeps working.
-  //
-  // Sign-up is closed until mail can be sent, because without it a password
-  // account is a dead end: its address is never verified, so brains shared
-  // with it by email silently grant nothing, and a forgotten password can
-  // never be reset. GitHub OAuth verifies the address as a side effect, which
-  // is why it stays open. Adding RESEND_API_KEY + EMAIL_FROM to .env turns
-  // sign-up and both mails on with no code change.
+  // SVOD stage 2: public self-registration is closed. Password sign-up is
+  // disabled outright (existing local credentials keep working); OAuth
+  // sign-ups are refused in databaseHooks below so existing OAuth logins keep
+  // working while new public accounts cannot be created. New users are created
+  // by the operator in /admin/users, verified at creation, without email APIs.
   emailAndPassword: {
     enabled: true,
-    disableSignUp: !emailReady,
+    disableSignUp: true,
     sendResetPassword: async ({ user, url }) => {
       await sendMail({
         to: user.email,
@@ -103,6 +100,16 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
+        // SVOD stage 2: refuse public sign-ups, including OAuth. This hook
+        // runs only on creation, never on sign-in — existing users (password
+        // or OAuth) keep signing in; no new row can be created through the
+        // public API. Operator-created users bypass Better Auth entirely
+        // (direct SQL + scrypt hash in /admin/users), so they are unaffected.
+        before: async () => {
+          throw new Error(
+            "Self-registration is disabled — ask your administrator for an account.",
+          );
+        },
         after: async (user) => {
           // Where they came from, read off the first-touch cookie the
           // middleware set on the visit. Best effort on purpose: a signup that

@@ -1,7 +1,7 @@
 import { translator } from "@/lib/t";
 import { redirect } from "next/navigation";
 import SignInForm from "./SignInForm";
-import { env, emailReady } from "@/lib/env";
+import { env } from "@/lib/env";
 import { currentUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -32,5 +32,5 @@ export default async function SignInPage({
   const githubEnabled = Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
   const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 
-  return <SignInForm githubEnabled={githubEnabled} googleEnabled={googleEnabled} signUpEnabled={emailReady} />;
+  return <SignInForm githubEnabled={githubEnabled} googleEnabled={googleEnabled} signUpEnabled={false} />;
 }

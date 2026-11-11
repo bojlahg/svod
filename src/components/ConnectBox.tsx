@@ -26,10 +26,19 @@ export default function ConnectBox({
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
+  // The origin comes from this browser's address bar on first render —
+  // never a baked build-time URL — so the copied command reaches this
+  // instance. The initializer runs only on the client; the server keeps the
+  // configured fallback for the first paint.
+  const [origin] = useState(
+    () =>
+      (typeof window !== "undefined" && window.location.origin) ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3300",
+  );
 
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3300";
   const secret = token ?? "YOUR_TOKEN";
-  const command = `claude mcp add --transport http mozg ${base}/mcp --header "Authorization: Bearer ${secret}"`;
+  const command = `claude mcp add --transport http mozg ${origin}/mcp --header "Authorization: Bearer ${secret}"`;
 
   async function copy() {
     await navigator.clipboard.writeText(command);

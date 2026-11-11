@@ -5,29 +5,32 @@ import { redirect } from "next/navigation";
 import { maybeOne, query } from "@/db";
 import type { Note } from "@/db/types";
 import { refreshNoteWeight } from "@/lib/note-weight";
-import { approve } from "@/lib/review";
+import { approve, reject } from "@/lib/review";
 import { currentUser } from "@/lib/session";
+import { brainAccessById } from "@/lib/svod-access";
 
 /**
- * The review queue for agent-written notes. Approving is where a note becomes
- * searchable — it is indexed here, not at write time, so "review required"
- * actually means something.
+ * SVOD review queue: reviewers and above only. Readers must neither see
+ * pending rows (gated in the page) nor approve/reject them — a forged form
+ * with a known note ID hits the same check here.
  */
 
-async function ownedNote(noteId: string, userId: string): Promise<Note | null> {
-  return maybeOne<Note>(
-    `select n.* from notes n
-       join brains b on b.id = n.brain_id
-      where n.id = $1 and b.owner_id = $2 and n.status = 'pending'`,
-    [noteId, userId],
+async function reviewableNote(noteId: string, userId: string): Promise<Note | null> {
+  const note = await maybeOne<Note>(
+    `select n.* from notes n where n.id = $1 and n.status = 'pending'`,
+    [noteId],
   );
+  if (!note) return null;
+  const access = await brainAccessById(note.brain_id, userId);
+  if (!access?.canReview) return null;
+  return note;
 }
 
 export async function approveNote(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const note = await ownedNote(String(formData.get("id")), user.id);
+  const note = await reviewableNote(String(formData.get("id")), user.id);
   if (!note) return;
 
   await approve(note);
@@ -35,23 +38,22 @@ export async function approveNote(formData: FormData) {
   revalidatePath(`/brains/${String(formData.get("slug"))}`);
 }
 
-/**
- * Close an agent's flag on a note. Either the owner fixed the note (or
- * removed it on the notes page) and the report did its job, or they looked
- * and disagreed — both end the same way: the flag is resolved by a human
- * who read it, which is all a flag ever asks for.
- */
 export async function dismissFlag(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const deleted = await query<{ note_id: string }>(
-    `delete from note_flags f using brains b
-      where f.id = $1 and b.id = f.brain_id and b.owner_id = $2
-      returning f.note_id`,
-    [String(formData.get("id")), user.id],
+  const flag = await maybeOne<{ brain_id: string; note_id: string }>(
+    `select brain_id, note_id from note_flags where id = $1`,
+    [String(formData.get("id"))],
   );
-  // A dismissed flag no longer counts against the note's ranking weight.
+  if (!flag) return;
+  const access = await brainAccessById(flag.brain_id, user.id);
+  if (!access?.canReview) return;
+
+  const deleted = await query<{ note_id: string }>(
+    `delete from note_flags where id = $1 returning note_id`,
+    [String(formData.get("id"))],
+  );
   if (deleted.length) await refreshNoteWeight(deleted[0].note_id);
   revalidatePath(`/brains/${String(formData.get("slug"))}`);
 }
@@ -60,9 +62,11 @@ export async function rejectNote(formData: FormData) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const note = await ownedNote(String(formData.get("id")), user.id);
+  const note = await reviewableNote(String(formData.get("id")), user.id);
   if (!note) return;
 
-  await query(`update notes set status = 'rejected' where id = $1`, [note.id]);
+  // Atomic in lib/review: a concurrent approval/rejection wins exactly once;
+  // the loser is a no-op that still revalidates to the current state.
+  await reject(note.id);
   revalidatePath(`/brains/${String(formData.get("slug"))}`);
 }

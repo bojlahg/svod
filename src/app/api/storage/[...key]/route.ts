@@ -29,8 +29,10 @@ export async function GET(
   if (!source) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const user = await requireUser(req).catch(() => null);
+  // Unknown, missing and ungranted are the same 404: the storage key is not
+  // a secret, and the status must not say which private base holds it.
   if (!(await canRead(source.brain_id, user?.id ?? null))) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   try {
@@ -38,7 +40,9 @@ export async function GET(
     return new NextResponse(new Uint8Array(body), {
       headers: {
         "content-type": source.mime ?? "application/octet-stream",
-        "cache-control": "private, max-age=3600",
+        // Never cacheable: a role change must take effect on the next
+        // request, not when a browser cache entry expires.
+        "cache-control": "private, no-store",
       },
     });
   } catch {

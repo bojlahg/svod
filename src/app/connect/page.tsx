@@ -164,15 +164,14 @@ export MOZG_TOKEN=mzg_...`}
           ])}</p>
 
           <div className="panel" style={{ padding: 0, marginTop: "1.25rem" }}>
-            {[
-              ["brain_list", t("What brains am I allowed to read?")],
-              ["brain_brief", t("What does this brain cover — and what is it known to be missing?")],
-              ["brain_search", t("Find what this project actually decided, before answering from general knowledge.")],
-              ["brain_read", t("Open one note in full.")],
-              ["brain_write", t("Save a convention or a pitfall worth keeping.")],
-              ["brain_create", t("Start a new brain, without leaving the editor.")],
-              ["brain_add_source", t("Feed it documentation pages or a block of text to read.")],
-            ].map(([name, what]) => (
+          {[
+            ["brain_list", t("What brains am I allowed to read?")],
+            ["brain_brief", t("What does this brain cover — and what is it known to be missing?")],
+            ["brain_search", t("Find what this project actually decided, before answering from general knowledge.")],
+            ["brain_read", t("Open one note in full.")],
+            ["brain_write", t("Propose a convention or a pitfall worth keeping — a reviewer approves it.")],
+            ["brain_create", t("Start a new private base, without leaving the editor.")],
+          ].map(([name, what]) => (
               <div
                 key={name}
                 style={{

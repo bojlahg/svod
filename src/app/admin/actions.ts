@@ -287,8 +287,20 @@ export async function deleteBrain(formData: FormData) {
  */
 export async function deleteUser(formData: FormData) {
   const admin = await requireAdmin();
+  const { env } = await import("@/lib/env");
   const id = String(formData.get("id"));
   if (id === admin.id) return; // no locking yourself out
+
+  // The .env bootstrap administrator is never deletable through this UI.
+  const target = await query<{ email: string }>(`select email from "user" where id = $1`, [
+    id,
+  ]);
+  if (!target.length) return;
+  const boot = (env.MOZG_ADMIN_EMAIL ?? "").trim().toLowerCase();
+  if (boot && target[0].email.trim().toLowerCase() === boot) {
+    console.log(`[admin] ${admin.email} tried to delete the bootstrap administrator`);
+    return;
+  }
 
   const rows = await query<{ balance_cents: number; purchases: number; sales: number }>(
     `select u.balance_cents,

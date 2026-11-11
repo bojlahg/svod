@@ -1,0 +1,98 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mozg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mozg}
+      POSTGRES_DB: mozg
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mozg -d mozg"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  embed:
+    image: ${SVOD_EMBED_IMAGE:-svod-embed:stage7}
+    restart: unless-stopped
+    environment:
+      EMBED_REVISION: 5617a9f61b028005a4858fdac845db406aefb181
+      EMBED_THREADS: "4"
+    volumes:
+      - models:/models
+    healthcheck:
+      # First boot downloads weights; /health answers before the model loads,
+      # so the start period is long on purpose.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8099/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 1200s
+
+  app:
+    image: ${SVOD_IMAGE:-svod:stage7}
+    restart: unless-stopped
+    ports:
+      - "${SVOD_PORT:-3300}:3300"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://mozg:${POSTGRES_PASSWORD:-mozg}@db:5432/mozg
+      EMBED_URL: http://embed:8099
+      EMBED_QUERY_URL: http://embed:8099
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Readiness, not model health: /api/ready is 200 once migrations and the
+      # admin bootstrap have finished. The embedder is deliberately not checked
+      # here — pages serve while weights download.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3300/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    # Secret first, migrations second: node cannot pass its own process.env to
+    # the next `&&` process, so the shell exports BETTER_AUTH_SECRET from the
+    # one-line printer (file-backed when the env has no usable secret) before
+    # selfhost-start and Next read it at their own startup.
+    command:
+      - sh
+      - -c
+      - |
+        S="$$BETTER_AUTH_SECRET"; VALID=0; if [ -n "$$S" ]; then LEN=$$(printf '%s' "$$S" | wc -c); if [ "$$LEN" -ge 32 ]; then case "$$S" in *example*|*EXAMPLE*|*Example*|*change-me*|*placeholder*|*Placeholder*) VALID=0;; change-me-openssl-rand-hex-32|build-time-placeholder-not-a-secret|example|test|secret|password) VALID=0;; *) VALID=1;; esac; fi; fi; if [ "$$VALID" -eq 0 ]; then S=$$(node dist/selfhost-secret.mjs); export BETTER_AUTH_SECRET="$$S"; else export BETTER_AUTH_SECRET="$$S"; fi; node dist/selfhost-start.mjs && exec node node_modules/next/dist/bin/next start -p 3300
+
+  worker:
+    image: ${SVOD_IMAGE:-svod:stage7}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://mozg:${POSTGRES_PASSWORD:-mozg}@db:5432/mozg
+      EMBED_URL: http://embed:8099
+      EMBED_QUERY_URL: http://embed:8099
+      STORAGE_LOCAL_DIR: /data/storage
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    # Same secret as app, the same way: without it the two processes diverge
+    # when secretbox is needed.
+    command:
+      - sh
+      - -c
+      - |
+        S="$$BETTER_AUTH_SECRET"; VALID=0; if [ -n "$$S" ]; then LEN=$$(printf '%s' "$$S" | wc -c); if [ "$$LEN" -ge 32 ]; then case "$$S" in *example*|*EXAMPLE*|*Example*|*change-me*|*placeholder*|*Placeholder*) VALID=0;; change-me-openssl-rand-hex-32|build-time-placeholder-not-a-secret|example|test|secret|password) VALID=0;; *) VALID=1;; esac; fi; fi; if [ "$$VALID" -eq 0 ]; then S=$$(node dist/selfhost-secret.mjs); export BETTER_AUTH_SECRET="$$S"; else export BETTER_AUTH_SECRET="$$S"; fi; exec node dist/worker/index.mjs
+
+volumes:
+  pgdata:
+  models:
+  storage:

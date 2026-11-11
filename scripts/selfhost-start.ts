@@ -1,8 +1,10 @@
 /**
  * Self-host bootstrapper: wait for Postgres, migrate, bootstrap the admin.
  *
- * Used only by docker-compose.selfhost.yml, which runs it *before* Next:
- * `sh -c "node dist/selfhost-start.mjs && exec <next>"`. A nonzero exit here
+ * Used by docker-compose.selfhost.yml and release/compose.yaml, which run it
+ * *before* Next: the shell first exports BETTER_AUTH_SECRET from
+ * dist/selfhost-secret.mjs (file-backed when the env has no usable secret),
+ * then `node dist/selfhost-start.mjs && exec <next>`. A nonzero exit here
  * stops the container before Next ever serves, and `exec` hands Docker's
  * signals straight to the Next process. Normal `npm run start` / `next
  * start`, manual `npm run db:migrate` and the prod compose keep working
@@ -17,20 +19,12 @@ import {
   ensureAdminWithClient,
   validateAdminEnv,
 } from "../src/lib/admin-bootstrap";
+import { resolveSessionSecret } from "../src/lib/session-secret";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Bundled: dist/selfhost-start.mjs → ../src/db/migrations.
 // tsx: scripts/selfhost-start.ts → ../src/db/migrations. Same relative hop.
 const migrationsDir = join(here, "..", "src", "db", "migrations");
-
-const EXAMPLE_SECRETS = new Set([
-  "change-me-openssl-rand-hex-32",
-  "build-time-placeholder-not-a-secret",
-  "example",
-  "test",
-  "secret",
-  "password",
-]);
 
 function fail(msg: string): never {
   console.error(`\n[selfhost-start] ${msg}`);
@@ -43,15 +37,17 @@ function checkEnv(): { databaseUrl: string; adminEmail: string; adminPassword: s
     fail("DATABASE_URL is missing — the compose file sets it from POSTGRES_PASSWORD; check .env (see .env.selfhost.example)");
   }
 
-  const secret = process.env.BETTER_AUTH_SECRET ?? "";
-  if (
-    !secret ||
-    secret.length < 32 ||
-    EXAMPLE_SECRETS.has(secret) ||
-    /example|change-me|placeholder/i.test(secret)
-  ) {
+  // Release kit: a usable BETTER_AUTH_SECRET from the environment wins and the
+  // file is left alone; otherwise read /data/storage/session-secret (or
+  // SVOD_SECRET_FILE) or generate it (0600) for the next boot. The container
+  // shell already exported the same value via dist/selfhost-secret.mjs before
+  // invoking this, so Next/better-auth see it at their own startup — setting
+  // process.env inside Node alone would not reach them.
+  try {
+    process.env.BETTER_AUTH_SECRET = resolveSessionSecret(process.env);
+  } catch (err) {
     fail(
-      "BETTER_AUTH_SECRET is missing or looks like an example — generate a stable one with `openssl rand -hex 32` and set it in .env (see .env.selfhost.example). The app will not start with a placeholder secret.",
+      `could not resolve BETTER_AUTH_SECRET: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 

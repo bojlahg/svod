@@ -114,26 +114,14 @@ export default function NewBrainForm({
         )}
 
         <Field
-          label={t("What should it be able to do?")}
-          hint={t("This becomes the exam. Be concrete — vague goals produce vague checks.")}
+          label={t("What should it be able to do? (optional)")}
+          hint={t("A short note about what this base holds. Exams are not part of the Markdown workspace.")}
         >
           <textarea
             name="goal"
             rows={4}
             key={kind}
             placeholder={style ? STYLE_EXAMPLE : EXAMPLES[0]}
-            style={inputStyle}
-          />
-        </Field>
-
-        <Field
-          label={t("Documentation link (optional)")}
-          hint={t("One link is enough — every page of that documentation is found and read. For docs sites that are JavaScript apps, paste the GitHub repository instead.")}
-        >
-          <input
-            name="docs"
-            type="url"
-            placeholder={t("https://example.com/docs — or github.com/owner/repo")}
             style={inputStyle}
           />
         </Field>

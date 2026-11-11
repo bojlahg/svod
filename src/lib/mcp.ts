@@ -30,8 +30,7 @@ import { isTopic } from "@/lib/topics";
 import { captureServer } from "@/lib/analytics";
 import { checkFetchableUrl } from "@/lib/url-guard";
 import { storage, storageKey } from "@/lib/storage";
-import { enqueueIngest, enqueueCrawl, enqueueSummary } from "@/worker/queue";
-import { summariesStale } from "@/worker/summary";
+import { enqueueIngest, enqueueCrawl } from "@/worker/queue";
 import type { TokenOwner } from "@/lib/tokens";
 
 export { TOOLS, type ToolDef } from "@/lib/mcp-tools";
@@ -231,13 +230,8 @@ async function brainBrief(handle: string, owner: TokenOwner): Promise<ToolOutcom
 
   const brief = await briefBrain(resolved.brain.id);
 
-  // Lazy summary compilation, same pattern as lessons on the study page: the
-  // brief notices the brain outgrew its summaries and queues a recompile, so
-  // the NEXT brief leads with them. Fire-and-forget — the answer below is
-  // complete without them.
-  if (await summariesStale(resolved.brain.id)) {
-    void enqueueSummary(resolved.brain.id).catch(() => {});
-  }
+  // Stage 3: no paid LLM scheduling from read-only paths. Summaries recompile
+  // elsewhere; the brief answers from what is already stored.
 
   const { accepted, rejected, pending } = brief.intake;
   const isStyle = resolved.brain.kind === "style";

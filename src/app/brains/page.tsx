@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { currentUser } from "@/lib/session";
 import { listAccessibleBrains } from "@/lib/svod-access";
-import { categoryScores, tintFor } from "@/lib/brains";
+import { tintFor } from "@/lib/brains";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,6 @@ export default async function BrainsPage() {
   // route (retired in the private fork).
   const bases = await listAccessibleBrains(user.id);
 
-  const scores = await categoryScores(bases.map((b) => b.id));
   if (!bases.length) {
     return (
       <AppShell active="/brains" eyebrow={t("Workspace")} title={t("Your bases")} narrow>
@@ -52,28 +51,20 @@ export default async function BrainsPage() {
         </p>
         <div className="grid-brains">
           {bases.map((b) => {
-            const cats = scores.get(b.id) ?? [];
             return (
               <Link key={b.id} href={`/brains/${b.id}`} className="card" data-tint={tintFor(b)}>
                 <span className="eyebrow" style={{ color: "inherit", opacity: 0.75 }}>
                   {b.owner_handle ?? ""} · {b.member_role} · {fill(t("<0/> notes"), [b.note_count])}
                 </span>
                 <h2 className="card-title">{b.title}</h2>
-                <p className="card-goal">{b.goal ?? t("No goal set yet.")}</p>
-                <div className="readout" role="img" aria-label={cats.map((c) => `${c.category}: ${c.passed}/${c.total}`).join(", ") || "Not examined yet"}>
-                  {(cats.length ? cats : Array.from({ length: 6 }, () => ({ state: "empty" as const }))).map((c, i) => (
-                    <span key={i} className="readout-cell" data-state={c.state} />
-                  ))}
-                </div>
+                <p className="card-goal">{b.goal ?? t("Markdown notes in folders.")}</p>
                 <div className="card-foot">
                   <span className="mono" style={{ fontSize: ".75rem", opacity: 0.8 }}>
                     {b.owner_handle ? `${b.owner_handle}/${b.slug}` : b.slug}
                   </span>
-                  {b.score !== null ? (
-                    <span className="card-score">{b.score}<sup>%</sup></span>
-                  ) : (
-                    <span style={{ opacity: 0.8 }}>{t("not examined")}</span>
-                  )}
+                  <span className="mono" style={{ fontSize: ".75rem", opacity: 0.8 }}>
+                    {b.id.slice(0, 8)}
+                  </span>
                 </div>
               </Link>
             );

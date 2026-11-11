@@ -5,8 +5,6 @@ import Link from "next/link";
 import SignOutLink from "@/components/SignOutLink";
 import { currentUser } from "@/lib/session";
 import { isAdmin } from "@/lib/admin";
-import { query } from "@/db";
-import { formatCents } from "@/lib/money-math";
 
 /**
  * The signed-in half of the product. Everything you do to your own account —
@@ -24,28 +22,16 @@ const GROUPS: {
   {
     title: msg("Work"),
     items: [
-      { href: "/brains", label: msg("Overview") },
-      { href: "/mind", label: msg("Your mind") },
-      { href: "/brains/new", label: msg("New brain") },
-      { href: "/workflows", label: msg("Workflows") },
+      { href: "/brains", label: msg("Bases") },
+      { href: "/brains/new", label: msg("New base") },
       { href: "/connect", label: msg("Connect an agent") },
-      { href: "/achievements", label: msg("Achievements") },
-      { href: "/chat", label: msg("chatmozg") },
     ],
   },
   {
     title: msg("Account"),
     items: [
-      { href: "/settings/balance", label: msg("Balance") },
-      { href: "/settings/purchases", label: msg("Library") },
       { href: "/settings/tokens", label: msg("Tokens") },
-      { href: "/settings/usage", label: msg("Usage") },
-      { href: "/settings/packs", label: msg("Packs & people") },
-      { href: "/settings", label: msg("Plan & profile") },
-      // Last in Account rather than first in Work: it is a way to make money
-      // from the product, not a part of using it, and putting it above
-      // "Balance" would be the tail wagging the dog.
-      { href: "/earn", label: msg("Earn with mozg") },
+      { href: "/settings", label: msg("Profile") },
     ],
   },
 ];
@@ -72,35 +58,12 @@ export default async function AppShell({
   const user = await currentUser();
   if (!user) return null; // callers redirect; this is belt and braces
 
-  const [row] = await query<{ balance_cents: number }>(
-    `select balance_cents from "user" where id = $1`,
-    [user.id],
-  );
-  const balance = row?.balance_cents ?? 0;
+  // SVOD: no billing/chat badges in the workspace. The operator manages people
+  // from /admin/users; waiting chat/errors live outside the retained surface.
 
-  // The operator should see a waiting message — or a fresh failure — from
-  // anywhere in the app, not only by opening the right admin page on a hunch.
-  const [adminUnread, adminErrors] = isAdmin(user)
-    ? await Promise.all([
-        query<{ n: number }>(
-          `select count(*)::int as n from chat_messages
-            where author = 'user' and read_at is null`,
-        ).then((r) => r[0]?.n ?? 0),
-        query<{ n: number }>(
-          `select count(*)::int as n from app_errors where resolved_at is null`,
-        ).then((r) => r[0]?.n ?? 0),
-      ])
-    : [0, 0];
-
-  // The public page only exists once there is a handle to put it under, and
-  // linking to /b/null would be a 404 with your own name on it.
-  const base = user.handle
-    ? GROUPS.map((g) =>
-        g.title === "Work"
-          ? { ...g, items: [...g.items, { href: `/b/${user.handle}`, label: "Your page" }] }
-          : g,
-      )
-    : GROUPS;
+  // SVOD: no public "Your page" — the two-segment legacy profile stays denied
+  // by the perimeter and is never linked from the workspace.
+  const base = GROUPS;
 
   const groups = isAdmin(user)
     ? [
@@ -109,14 +72,7 @@ export default async function AppShell({
           title: "Operator",
           items: [
             { href: "/admin", label: "System" },
-            { href: "/admin/chat", label: "Chat", badge: adminUnread },
-            { href: "/admin/errors", label: "Errors", badge: adminErrors },
             { href: "/admin/users", label: "People" },
-            { href: "/admin/brains", label: "All brains" },
-            { href: "/admin/marketing", label: "Marketing" },
-            { href: "/admin/lessons", label: "Lessons" },
-            { href: "/admin/promo", label: "Promo" },
-            { href: "/admin/announcements", label: "Announcements" },
           ],
         },
       ]
@@ -151,9 +107,7 @@ export default async function AppShell({
             </span>
             <span style={{ minWidth: 0 }}>
               <span className="app-me-name">{user.handle ?? user.email.split("@")[0]}</span>
-              <span className="app-me-sub">
-                {user.plan} · {formatCents(balance)}
-              </span>
+              <span className="app-me-sub">{user.email}</span>
             </span>
           </Link>
 
@@ -172,8 +126,6 @@ export default async function AppShell({
 
             <div>
               <p className="eyebrow app-nav-title">{t("Elsewhere")}</p>
-              <Link href="/explore">{t("Catalogue")}</Link>
-              <Link href="/guide">{t("Guide")}</Link>
               <SignOutLink />
             </div>
           </nav>

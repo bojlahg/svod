@@ -2,8 +2,7 @@
 
 import { useT } from "@/lib/t-client";
 import { markup } from "@/lib/markup";
-import { useActionState, useState } from "react";
-import { addUrls } from "@/app/brains/[slug]/source-actions";
+import { useState } from "react";
 import { dismissGapSuggestion } from "@/app/brains/[slug]/exam-actions";
 import { GAP_KIND_LABEL, type GapKind } from "@/lib/gap-kind";
 
@@ -64,9 +63,6 @@ function GapRow({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [crawl, setCrawl] = useState(false);
-  const [state, action, pending] = useActionState(addUrls, null);
-  const added = typeof state?.added === "number" && state.added > 0;
 
   return (
     <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--rule)" }}>
@@ -85,87 +81,26 @@ function GapRow({
             {suggestion.kind}: {GAP_KIND_LABEL[suggestion.kind]}
           </span>
         </span>
-        {!added && (
-          <span style={{ display: "flex", gap: "1rem", flexShrink: 0 }}>
-            {suggestion.kind === "missing" && (
-              <button className="mono" style={linkButton} onClick={() => setOpen((o) => !o)}>
-                {open ? t("close") : t("add a source →")}
-              </button>
-            )}
-            <form action={dismissGapSuggestion}>
-              <input type="hidden" name="id" value={suggestion.id} />
-              <input type="hidden" name="slug" value={slug} />
-              <button className="mono" style={linkButton}>
-                {t("dismiss")}
-              </button>
-            </form>
-          </span>
-        )}
-      </div>
-
-      {added ? (
-        <p className="mono" style={{ fontSize: ".8125rem", margin: ".5rem 0 0", color: "var(--color-riso-green)" }}>
-          {state?.site
-            ? t("Reading the whole site — the exam re-runs when it lands.")
-            : t("Queued — the exam re-runs when the page is read.")}
-        </p>
-      ) : (
-        open && (
-          <form action={action} style={{ display: "grid", gap: ".5rem", marginTop: ".75rem" }}>
+        <span style={{ display: "flex", gap: "1rem", flexShrink: 0 }}>
+          {suggestion.kind === "missing" && (
+            <button className="mono" style={linkButton} onClick={() => setOpen((o) => !o)}>
+              {open ? t("close") : t("add a source →")}
+            </button>
+          )}
+          <form action={dismissGapSuggestion}>
+            <input type="hidden" name="id" value={suggestion.id} />
             <input type="hidden" name="slug" value={slug} />
-            <input type="hidden" name="suggestion" value={suggestion.id} />
-            <label
-              className="mono"
-              style={{ display: "flex", gap: ".5rem", alignItems: "center", fontSize: ".8125rem" }}
-            >
-              <input
-                type="checkbox"
-                name="crawl"
-                checked={crawl}
-                onChange={(e) => setCrawl(e.target.checked)}
-              />
-              {t("Learn the whole site from one link")}
-            </label>
-            <textarea
-              name="urls"
-              rows={crawl ? 1 : 2}
-              autoFocus
-              required
-              placeholder={
-                crawl
-                  ? "https://… the root of the docs that cover this"
-                  : "https://… a page that answers this question"
-              }
-              style={{
-                width: "100%",
-                padding: ".55rem .7rem",
-                border: "1.5px solid var(--ink)",
-                background: "var(--paper)",
-                font: "inherit",
-                fontSize: ".875rem",
-              }}
-            />
-            {state?.error && (
-              <p className="mono" style={{ color: "var(--color-riso-red)", fontSize: ".8125rem", margin: 0 }}>
-                {state.error}
-              </p>
-            )}
-            {state?.refused?.length ? (
-              <div className="mono" style={{ fontSize: ".75rem", color: "var(--color-riso-red)" }}>
-                {state.refused.map((r) => (
-                  <div key={r}>✕ {r}</div>
-                ))}
-              </div>
-            ) : null}
-            <button
-              className="btn"
-              disabled={pending}
-              style={{ padding: ".4rem .8rem", justifySelf: "start" }}
-            >
-              {pending ? t("Adding…") : t("Add and re-examine")}
+            <button className="mono" style={linkButton}>
+              {t("dismiss")}
             </button>
           </form>
-        )
+        </span>
+      </div>
+
+      {open && (
+        <p className="mono" style={{ fontSize: ".8125rem", margin: ".5rem 0 0", color: "var(--ink-3)" }}>
+          {t("Retired: add a Markdown note instead.")}
+        </p>
       )}
     </div>
   );

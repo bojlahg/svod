@@ -40,12 +40,12 @@ export default function GoalEditor({
         >
           {goal ? t("edit goal") : t("set a goal")} →
         </button>
-        {state?.requeued && (
+        {state?.error && (
           <p
             className="mono"
-            style={{ fontSize: ".75rem", color: "var(--color-riso-green)", marginTop: ".4rem" }}
+            style={{ fontSize: ".75rem", color: "var(--color-riso-red)", marginTop: ".4rem" }}
           >
-            {t("Goal changed — the exam was cleared and re-queued.")}</p>
+            {state.error}</p>
         )}
       </div>
     );

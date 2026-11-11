@@ -136,6 +136,8 @@ export interface Note {
   id: string;
   brain_id: string;
   source_id: string | null;
+  /** SVOD stage 3: optional folder; NULL = base root. Same-base enforced. */
+  folder_id: string | null;
   title: string;
   body: string;
   category: string | null;
@@ -150,6 +152,15 @@ export interface Note {
   /** Feedback-driven ranking multiplier, clamped 0.5-2.0; see note-weight.ts. */
   weight: number;
   created_at: Date;
+}
+
+export interface Folder {
+  id: string;
+  brain_id: string;
+  parent_id: string | null;
+  name: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface Chunk {

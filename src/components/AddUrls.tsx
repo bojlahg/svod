@@ -1,7 +1,7 @@
 "use client";
 
 import { useT } from "@/lib/t-client";
-import { fill, markup } from "@/lib/markup";
+import { markup } from "@/lib/markup";
 import { useActionState, useState } from "react";
 import { addUrls } from "@/app/brains/[slug]/source-actions";
 
@@ -77,24 +77,8 @@ export default function AddUrls({ slug }: { slug: string }) {
         </p>
       )}
 
-      {typeof state?.added === "number" && (
-        <p className="mono" style={{ fontSize: ".8125rem", margin: 0, color: "var(--color-riso-green)" }}>
-          {state.site
-            ? t("Reading the whole site — pages appear in the source list as they are found.")
-            : fill(
-                state.added === 1 ? t("Queued <0/> page") : t("Queued <0/> pages"),
-                [state.added],
-              )}
-        </p>
-      )}
-
-      {state?.refused?.length ? (
-        <div className="mono" style={{ fontSize: ".75rem", color: "var(--color-riso-red)" }}>
-          {state.refused.map((r) => (
-            <div key={r}>✕ {r}</div>
-          ))}
-        </div>
-      ) : null}
+      <p className="mono" style={{ fontSize: ".75rem", color: "var(--ink-3)" }}>
+        {t("Retired: add a Markdown note instead.")}</p>
 
       <div style={{ display: "flex", gap: ".5rem" }}>
         <button className="btn" disabled={pending} style={{ padding: ".45rem .9rem" }}>

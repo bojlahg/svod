@@ -27,8 +27,8 @@ say so rather than failing quietly.
 ## Then
 
 ```bash
-/plugin marketplace add egorfedorov/mozg-plugin
-/plugin install mozg-stake@mozg
+/plugin marketplace add bojlahg/svod
+/plugin install svod-stake@svod
 ```
 
 ## What it is, honestly

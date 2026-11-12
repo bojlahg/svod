@@ -85,7 +85,7 @@ async function check(): Promise<SystemStatus> {
     {
       key: "web",
       label: "Website",
-      blurb: "mozg.sh, the catalogue, and every brain page.",
+      blurb: "svod, and every base page.",
       state: "ok",
       detail: "answering — you are reading it",
     },

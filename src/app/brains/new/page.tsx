@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata() {
   const t = await translator();
-  return { title: t("New brain — mozg") };
+  return { title: t("New brain — svod") };
 }
 
 export default async function NewBrainPage() {

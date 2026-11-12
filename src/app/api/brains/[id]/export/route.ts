@@ -11,7 +11,7 @@ import { requireUser } from "@/lib/session";
 
 const PRECEDENCE =
   "> **This is a snapshot.** It was correct on the day it was exported and has " +
-  "no way of noticing that it is not any more. If the mozg MCP server is " +
+  "no way of noticing that it is not any more. If the svod MCP server is " +
   "connected in this session, search the live brain instead and use this file " +
   "only as a fallback: the brain is re-read when its sources change and re-sat " +
   "against its own exam, and it can tell you what it does *not* know. Where the " +

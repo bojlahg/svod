@@ -20,10 +20,10 @@
  */
 
 /** The marketplace these are installed from — `<plugin>@<marketplace>`. */
-export const MARKETPLACE = "mozg";
+export const MARKETPLACE = "svod";
 
 /** Where a first-time reader adds the marketplace before installing anything. */
-export const MARKETPLACE_SOURCE = "egorfedorov/mozg-plugin";
+export const MARKETPLACE_SOURCE = "bojlahg/svod";
 
 /**
  * Everything mozg publishes. Keys are the plugin names in marketplace.json —
@@ -31,20 +31,31 @@ export const MARKETPLACE_SOURCE = "egorfedorov/mozg-plugin";
  * other in the tests rather than trusted to stay in step by hand.
  */
 export const PLUGINS: Record<string, string> = {
-  mozg: "The brains themselves: search them, and write back what you work out.",
-  // The hands for mozg/spine-2d-animation. Listed here is what turns the brain's
+  svod: "The brains themselves: search them, and write back what you work out.",
+  // The hands for the Spine brain. Listed here is what turns the brain's
   // declared tool into a real install line — see brains.tools and 0087.
-  "mozg-spine":
+  "svod-spine":
     "Rig a cut-up character into an animated Spine skeleton, pack atlases, export runtime json.",
-  // Google's chrome-devtools-mcp, wired with an isolated profile. The hands for
-  // mozg/pixijs-casino, whose whole subject is budgets nobody has measured.
-  "mozg-devtools":
+  // Google's chrome-devtools-mcp, wired with an isolated profile.
+  "svod-devtools":
     "Measure a running game: performance traces, FPS, draw calls, console and network.",
   // Wiring only — stakecli is a binary the reader installs themselves, so the
   // brain carries a docs link beside this command rather than instead of it.
-  "mozg-stake":
+  "svod-stake":
     "Upload math and front-end bundles to Stake Engine, check compliance, publish a release.",
 };
+
+/** Names stored before the product was called svod. They still install. */
+const LEGACY_PLUGINS: Record<string, string> = {
+  mozg: "svod",
+  "mozg-spine": "svod-spine",
+  "mozg-devtools": "svod-devtools",
+  "mozg-stake": "svod-stake",
+};
+
+export function canonicalPlugin(name: string): string {
+  return LEGACY_PLUGINS[name] ?? name;
+}
 
 /**
  * The companion plugins — everything except the brains themselves.
@@ -56,12 +67,12 @@ export const PLUGINS: Record<string, string> = {
  */
 export function companionPlugins(): { name: string; what: string }[] {
   return Object.entries(PLUGINS)
-    .filter(([name]) => name !== "mozg")
+    .filter(([name]) => name !== "svod")
     .map(([name, what]) => ({ name, what }));
 }
 
 export function isPublishedPlugin(name: string): boolean {
-  return Object.hasOwn(PLUGINS, name);
+  return Object.hasOwn(PLUGINS, canonicalPlugin(name));
 }
 
 /**
@@ -69,5 +80,6 @@ export function isPublishedPlugin(name: string): boolean {
  * caller renders nothing rather than guessing at a command.
  */
 export function installCommand(name: string): string | null {
-  return isPublishedPlugin(name) ? `/plugin install ${name}@${MARKETPLACE}` : null;
+  const key = canonicalPlugin(name);
+  return Object.hasOwn(PLUGINS, key) ? `/plugin install ${key}@${MARKETPLACE}` : null;
 }

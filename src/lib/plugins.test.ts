@@ -22,8 +22,10 @@ test("every plugin mozg offers is one the marketplace really ships", () => {
 });
 
 test("the command is only ever built for something we publish", () => {
-  assert.equal(installCommand("mozg"), "/plugin install mozg@mozg");
-  assert.equal(installCommand("mozg-spine"), "/plugin install mozg-spine@mozg");
+  assert.equal(installCommand("svod"), "/plugin install svod@svod");
+  assert.equal(installCommand("mozg"), "/plugin install svod@svod");
+  assert.equal(installCommand("svod-spine"), "/plugin install svod-spine@svod");
+  assert.equal(installCommand("mozg-spine"), "/plugin install svod-spine@svod");
   // The shape of the bug this replaced: a plausible name for a thing we do not
   // ship has to produce nothing, not a command. `spine-mcp` is the package name
   // of the server itself — real, and still not a mozg plugin.

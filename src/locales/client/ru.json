@@ -525,5 +525,18 @@
   "Uploaded.": "Загружено.",
   "Retired: add a Markdown note instead.": "Выведено из использования: добавьте Markdown-заметку.",
   "Retired: add a Markdown note instead": "Выведено из использования: добавьте Markdown-заметку",
-  "[image<0/>]": "[изображение<0/>]"
+  "[image<0/>]": "[изображение<0/>]",
+  "svod<0>.</0>": "svod<0>.</0>",
+  "This is a private svod base. We never ask for another service's password.": "Это частная база svod. Мы никогда не просим пароль другого сервиса.",
+  "The name you and your agents will see.": "Имя, которое будете видеть вы и ваши агенты.",
+  "A label for what this base is about.": "Метка, о чём эта база.",
+  "Design system": "Дизайн-система",
+  "Match our design system exactly: colour, type scale, spacing, component rules, empty and error states.": "Повтори нашу дизайн-систему точно: цвет, шкала шрифта, отступы, правила компонентов, пустые состояния и ошибки.",
+  "Answer questions about the Stripe webhook flow we actually run — our retries and idempotency, not the docs version.": "Отвечай про тот поток вебхуков Stripe, который мы реально запускаем — наши повторы и идемпотентность, а не версию из документации.",
+  "Follow our Postgres conventions: naming, migrations, indexing, and the things we never do.": "Следуй нашим соглашениям Postgres: имена, миграции, индексы и то, чего мы никогда не делаем.",
+  "What should it be able to do? (optional)": "Что она должна уметь? (необязательно)",
+  "A short note about what this base holds. Exams are not part of the Markdown workspace.": "Короткая пометка, что в этой базе. Экзаменов в Markdown-рабочей области нет.",
+  "New here? Ask your administrator for an account — public registration is closed.": "Вы здесь впервые? Попросите администратора завести учётную запись — открытая регистрация закрыта.",
+  "Shown to other members on shared bases.": "Это имя видят другие участники общих баз.",
+  "Your local namespace for base addresses.": "Ваше локальное имя в адресах баз."
 }

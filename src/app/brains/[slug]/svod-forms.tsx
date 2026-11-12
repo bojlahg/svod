@@ -139,7 +139,7 @@ export function SvodBaseRenameForm({
   const pending = direct.pending || fallbackPending;
   const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginBottom: ".6rem" }}>
+    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginBottom: ".6rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input
         name="title"
@@ -180,7 +180,7 @@ export function SvodFolderCreateForm({
   const state = (direct.result as ActionState) ?? fallbackState;
   if (compact) {
     return (
-      <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginTop: ".35rem" }}>
+      <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginTop: ".35rem" }}>
         <input type="hidden" name="brainId" value={brainId} />
         <input type="hidden" name="slug" value={slug} />
         <input
@@ -199,7 +199,7 @@ export function SvodFolderCreateForm({
     );
   }
   return (
-    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".4rem", marginTop: ".5rem" }}>
+    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".4rem", marginTop: ".5rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="slug" value={slug} />
       <input
@@ -249,7 +249,7 @@ export function SvodFolderRenameForm({
   const pending = direct.pending || fallbackPending;
   const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".25rem" }}>
+    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".25rem" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="folderId" value={folderId} />
       <input
@@ -291,7 +291,7 @@ export function SvodNoteMoveForm({
   const pending = direct.pending || fallbackPending;
   const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center", flexWrap: "wrap" }}>
+    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center", flexWrap: "wrap" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <input type="hidden" name="slug" value={slug} />
       <input type="hidden" name="noteId" value={noteId} />
@@ -329,7 +329,7 @@ export function SvodIndexRefreshForm({ brainId }: { brainId: string }) {
   const pending = direct.pending || fallbackPending;
   const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center" }}>
+    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", alignItems: "center" }}>
       <input type="hidden" name="brainId" value={brainId} />
       <button className="svod-btn" type="submit" disabled={pending}>
         {pending ? t("Refreshing…") : t("Refresh embeddings")}
@@ -354,7 +354,6 @@ export function SvodAutoIndexForm({ brainId, initial }: { brainId: string; initi
   return (
     <form
       action={fallbackAction}
-      method="post"
       onSubmit={direct.onSubmit}
       style={{ display: "flex", gap: ".35rem", alignItems: "center" }}
     >

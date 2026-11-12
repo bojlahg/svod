@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata() {
   const t = await translator();
-  return { title: t("Sign in — mozg") };
+  return { title: t("Sign in — svod") };
 }
 
 export default async function SignInPage({

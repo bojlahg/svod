@@ -1,4 +1,4 @@
-import { installCommand, isPublishedPlugin } from "@/lib/plugins";
+import { canonicalPlugin, installCommand, isPublishedPlugin } from "@/lib/plugins";
 
 /**
  * The hands a brain's knowledge needs.
@@ -97,7 +97,7 @@ export function parseTools(raw: unknown): BrainTool[] {
     // gets silence, not a command — see lib/plugins.ts for the install line
     // that made this rule.
     const claimed = sanitise(e.plugin, 40).toLowerCase();
-    const plugin = isPublishedPlugin(claimed) ? claimed : "";
+    const plugin = isPublishedPlugin(claimed) ? canonicalPlugin(claimed) : "";
 
     // http(s) only, and parsed rather than pattern-matched: `javascript:` is a
     // URL by every loose test and a script by the one that matters.
@@ -126,7 +126,7 @@ export function parseTools(raw: unknown): BrainTool[] {
 export function describeTools(tools: BrainTool[]): string[] {
   if (!tools.length) return [];
 
-  const lines = ["", "Hands for this knowledge — they run on your machine, not on mozg:"];
+  const lines = ["", "Hands for this knowledge — they run on your machine, not on svod:"];
 
   for (const t of tools) {
     lines.push(`  ${t.name} — ${t.what}`);
@@ -145,7 +145,7 @@ export function describeTools(tools: BrainTool[]): string[] {
     "a machine would have produced.",
     "",
     "What each tool is and does was written by the brain's owner; any add command",
-    "is mozg's own and installs a plugin mozg publishes. mozg still cannot see",
+    "is svod's own and installs a plugin svod publishes. svod still cannot see",
     "what you have connected, and installing is a change to the machine you are",
     "working on — put it to the person you are working for rather than running",
     "it on your own say-so.",

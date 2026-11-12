@@ -72,8 +72,8 @@ export default function SignInForm({
   return (
     <main className="shell" style={{ paddingBlock: "clamp(3rem, 9vw, 6rem)", maxWidth: 460 }}>
       <Link href="/" className="wordmark" style={{ display: "inline-block" }}>
-        {markup(t("mozg<0>.</0>"), [
-        <span style={{ color: "var(--color-riso-red)" }} key="s0" />,
+        {markup(t("svod<0>.</0>"), [
+        <span key="s0" />,
       ])}</Link>
 
       <h1 className="h1" style={{ margin: "1.5rem 0 .5rem" }}>
@@ -90,19 +90,7 @@ export default function SignInForm({
           domain with a password field and no stated identity is the exact
           shape of a credential-harvesting page. */}
       <p className="mono" style={{ fontSize: ".75rem", color: "var(--ink-3)", marginTop: 0, marginBottom: "1.5rem" }}>
-        {markup(
-          t(
-            "This is a mozg.sh account — open source, AGPL: <0/>. We never ask for another service\u2019s password.",
-          ),
-          [
-            <a
-              href="https://github.com/egorfedorov/mozg"
-              style={{ textDecoration: "underline" }}
-              key="s0"
-            >
-              {t("github.com/egorfedorov/mozg")}</a>,
-          ],
-        )}
+        {t("This is a private svod base. We never ask for another service's password.")}
       </p>
 
       {(githubEnabled || googleEnabled) && (
@@ -228,7 +216,7 @@ export default function SignInForm({
 const field: React.CSSProperties = {
   width: "100%",
   padding: ".7rem .85rem",
-  border: "1.5px solid var(--ink)",
+  border: "1px solid var(--rule)",
   background: "var(--paper-2)",
   color: "var(--ink)",
   font: "inherit",

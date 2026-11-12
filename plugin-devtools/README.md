@@ -10,8 +10,8 @@ measures.
 ## Install
 
 ```bash
-/plugin marketplace add egorfedorov/mozg-plugin
-/plugin install mozg-devtools@mozg
+/plugin marketplace add bojlahg/svod
+/plugin install svod-devtools@svod
 ```
 
 Needs Node. The server is fetched from npm on first run, so there is nothing

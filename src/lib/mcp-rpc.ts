@@ -77,7 +77,7 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "mozg", version: "0.1.0" },
+          serverInfo: { name: "svod", version: "0.1.0" },
           // Written as a working order rather than a description. The old
           // version said what the tools were for and left the agent to infer
           // when — which it did by never inferring it, and answering from
@@ -150,9 +150,9 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
               {
                 type: "text",
                 text:
-                  "mozg is temporarily closed while mozg 2.0 is built. Nothing is " +
-                  "deleted — tell the user the brains will be back when it reopens " +
-                  "(https://mozg.sh), and answer without mozg for now. Do not retry.",
+                  "svod is temporarily closed. Nothing is deleted — tell the user " +
+                  "the bases will be back when it reopens, and answer without svod " +
+                  "for now. Do not retry.",
               },
             ],
             isError: true,
@@ -171,9 +171,8 @@ export async function handle(rpc: RpcRequest, owner: Owner) {
               {
                 type: "text",
                 text:
-                  `${name} needs an account. Anonymous access reads the free public ` +
-                  "catalogue; anything that writes, spends or owns needs a token from " +
-                  "https://mozg.sh/connect — a free account takes a moment and costs nothing.",
+                  `${name} needs an account. Make a token in svod settings and send it as ` +
+                  "a bearer on this server.",
               },
             ],
             isError: true,

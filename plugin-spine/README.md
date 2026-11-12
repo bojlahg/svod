@@ -13,8 +13,8 @@ about timing. Install both.
 ## Install
 
 ```bash
-/plugin marketplace add egorfedorov/mozg-plugin
-/plugin install mozg-spine@mozg
+/plugin marketplace add bojlahg/svod
+/plugin install svod-spine@svod
 ```
 
 Needs [uv](https://docs.astral.sh/uv/) on the machine; the server and its Python

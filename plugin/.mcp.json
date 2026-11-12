@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "mozg": {
+    "svod": {
       "type": "http",
-      "url": "https://mozg.sh/mcp",
+      "url": "http://localhost:3300/mcp",
       "headers": {
-        "Authorization": "Bearer ${MOZG_TOKEN}"
+        "Authorization": "Bearer ${SVOD_TOKEN}"
       }
     }
   }

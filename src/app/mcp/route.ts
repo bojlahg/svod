@@ -13,7 +13,7 @@ import { handle, fail, MAX_BATCH, PROTOCOL_VERSION, type RpcRequest } from "@/li
  * tools-only server needs `initialize`, `tools/list`, `tools/call` and `ping`.
  *
  * Auth is a bearer token (see /settings/tokens):
- *   claude mcp add --transport http mozg https://mozg.sh/mcp \
+ *   claude mcp add --transport http svod https://example/mcp \
  *     --header "Authorization: Bearer mzg_..."
  */
 
@@ -27,22 +27,23 @@ import { handle, fail, MAX_BATCH, PROTOCOL_VERSION, type RpcRequest } from "@/li
  * unavailable, and nobody learns that one export line fixes it. Every branch
  * here names the fix.
  */
-function unauthorizedReason(req: Request): string {
+function unauthorizedReason(req: Request, base: string): string {
   const raw = req.headers.get("authorization");
   if (!raw) {
     return (
-      "Unauthorized: no token. Make one at https://mozg.sh/connect and set it as " +
-      "MOZG_TOKEN in your shell profile (the plugin sends it), or sign in through " +
+      "Unauthorized: no token. Make one at " + base + "/settings/tokens and set it as " +
+      "SVOD_TOKEN in your shell profile (the plugin sends it), or sign in through " +
       "OAuth if your client supports it."
     );
   }
   // An unexpanded shell variable arrives verbatim. Recognising it saves the
-  // user from debugging our server instead of their profile.
-  if (raw.includes("${") || raw.includes("$MOZG_TOKEN")) {
+  // user from debugging our server instead of their profile. The old name is
+  // still recognised so a config that was not renamed gets the same hint.
+  if (raw.includes("${") || raw.includes("$SVOD_TOKEN") || raw.includes("$MOZG_TOKEN")) {
     return (
       "Unauthorized: the token placeholder was sent unexpanded — your shell did " +
-      "not have MOZG_TOKEN set when the MCP server started. Export it in your " +
-      "profile (get one at https://mozg.sh/connect) and restart the client."
+      "not have SVOD_TOKEN set when the MCP server started. Export it in your " +
+      "profile (get one at " + base + "/settings/tokens) and restart the client."
     );
   }
   if (!/^bearer\s/i.test(raw)) {
@@ -50,7 +51,7 @@ function unauthorizedReason(req: Request): string {
   }
   return (
     "Unauthorized: this token is unknown, revoked, or belongs to a deleted " +
-    "account. Check https://mozg.sh/settings/tokens — issuing a new one takes a click."
+    "account. Check " + base + "/settings/tokens — issuing a new one takes a click."
   );
 }
 
@@ -76,12 +77,12 @@ export async function POST(req: Request) {
     // be the public one.
     const base = env.NEXT_PUBLIC_APP_URL;
     return NextResponse.json(
-      { jsonrpc: "2.0", id: null, error: { code: -32001, message: unauthorizedReason(req) } },
+      { jsonrpc: "2.0", id: null, error: { code: -32001, message: unauthorizedReason(req, base) } },
       {
         status: 401,
         headers: {
           "WWW-Authenticate":
-            `Bearer realm="mozg", resource_metadata="${base}/.well-known/oauth-protected-resource"`,
+            `Bearer realm="svod", resource_metadata="${base}/.well-known/oauth-protected-resource"`,
         },
       },
     );
@@ -117,7 +118,7 @@ export async function POST(req: Request) {
 /** Some clients probe with GET before opening a session. */
 export async function GET() {
   return NextResponse.json(
-    { name: "mozg", protocolVersion: PROTOCOL_VERSION, transport: "streamable-http" },
+    { name: "svod", protocolVersion: PROTOCOL_VERSION, transport: "streamable-http" },
     { status: 200 },
   );
 }

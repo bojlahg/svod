@@ -6,7 +6,7 @@ export default async function SiteFooter() {
   const t = await translator();
 
   return (
-    <footer style={{ borderTop: "1.5px solid var(--ink)", marginTop: "clamp(4rem, 9vw, 6rem)" }}>
+    <footer style={{ borderTop: "1px solid var(--rule)", marginTop: "clamp(4rem, 9vw, 6rem)" }}>
       <div
         className="shell"
         style={{

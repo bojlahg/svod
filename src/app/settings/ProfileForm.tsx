@@ -62,7 +62,7 @@ export default function ProfileForm({
 const input: React.CSSProperties = {
   width: "100%",
   padding: ".6rem .8rem",
-  border: "1.5px solid var(--ink)",
+  border: "1px solid var(--rule)",
   background: "var(--paper)",
   color: "var(--ink)",
   font: "inherit",

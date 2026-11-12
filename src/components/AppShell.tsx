@@ -90,7 +90,7 @@ export default async function AppShell({
 
         <div className="app-rail-head">
           <Link href="/" className="wordmark" style={{ fontSize: "1.25rem" }}>
-            {markup(t("mozg<0>.</0>"), [
+            {markup(t("svod<0>.</0>"), [
             <span key="s0" />,
           ])}</Link>
 

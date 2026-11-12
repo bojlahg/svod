@@ -17,7 +17,6 @@ const createSchema = z.object({
   docs: z.string().trim().max(2000).optional(),
   topic: z.string().catch("other").transform((t) => (TOPIC_KEYS.includes(t) ? t : "other")),
   parent: z.string().trim().optional(),
-  kind: z.enum(["knowledge", "style"]).catch("knowledge"),
 });
 
 export async function createBrain(_prev: unknown, formData: FormData) {
@@ -29,7 +28,6 @@ export async function createBrain(_prev: unknown, formData: FormData) {
     goal: formData.get("goal") || undefined,
     docs: undefined,
     topic: formData.get("topic") ?? "other",
-    kind: formData.get("kind") === "style" ? "style" : "knowledge",
     parent: String(formData.get("parent") ?? "") || undefined,
   });
   if (!parsed.success) {
@@ -66,7 +64,7 @@ export async function createBrain(_prev: unknown, formData: FormData) {
 
   const brain = await one<Brain>(
     `insert into brains (owner_id, slug, title, goal, topic, parent_id, visibility, price_cents, kind)
-     values ($1, $2, $3, $4, $5, $6, 'private', 0, $7) returning *`,
+     values ($1, $2, $3, $4, $5, $6, 'private', 0, 'knowledge') returning *`,
     [
       user.id,
       slug,
@@ -74,7 +72,6 @@ export async function createBrain(_prev: unknown, formData: FormData) {
       parsed.data.goal ?? null,
       parsed.data.topic,
       parentId,
-      parsed.data.kind,
     ],
   );
 

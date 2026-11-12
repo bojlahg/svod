@@ -1,28 +1,28 @@
 {
-  "name": "mozg",
+  "name": "svod",
   "owner": {
-    "name": "mozg",
-    "url": "https://mozg.sh"
+    "name": "svod",
+    "url": "https://github.com/bojlahg/svod"
   },
   "plugins": [
     {
       "source": "./plugin",
-      "name": "mozg",
+      "name": "svod",
       "description": "Knowledge brains over MCP: search them before answering, save what you work out back into them."
     },
     {
       "source": "./plugin-spine",
-      "name": "mozg-spine",
+      "name": "svod-spine",
       "description": "Hands for the Spine 2D Animation brain: rig a cut-up character into an animated Spine skeleton, pack atlases, export runtime json. Your own Spine licence, or none at all."
     },
     {
       "source": "./plugin-devtools",
-      "name": "mozg-devtools",
+      "name": "svod-devtools",
       "description": "Hands for the PixiJS brain: measure a running game instead of guessing \u2014 traces, FPS, draw calls, console, network."
     },
     {
       "source": "./plugin-stake",
-      "name": "mozg-stake",
+      "name": "svod-stake",
       "description": "Hands for the Stake Engine brain: upload bundles, run compliance checks, publish a release. Needs the stakecli binary."
     }
   ]

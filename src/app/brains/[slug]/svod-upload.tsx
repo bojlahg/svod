@@ -36,7 +36,6 @@ export default function SvodUpload({
   return (
     <form
       action={fallbackAction}
-      method="post"
       onSubmit={direct.onSubmit}
       style={{ display: "flex", gap: ".5rem", alignItems: "flex-end", flexWrap: "wrap" }}
     >

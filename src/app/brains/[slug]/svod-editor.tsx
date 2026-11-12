@@ -100,7 +100,7 @@ export default function SvodEditor({
         </div>
       </details>
 
-      <form action={fallbackAction} method="post" onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".6rem" }}>
+      <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "grid", gap: ".6rem" }}>
         <input type="hidden" name="brainId" value={brainId} />
         <input type="hidden" name="slug" value={slug} />
         {noteId ? <input type="hidden" name="noteId" value={noteId} /> : null}

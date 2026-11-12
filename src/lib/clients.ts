@@ -37,7 +37,7 @@ export const CLIENTS: Client[] = [
     vendor: "Anthropic",
     family: "cli",
     format: "command",
-    snippet: `claude mcp add --transport http mozg ${URL_PLACEHOLDER} \\\n  --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"`,
+    snippet: `claude mcp add --transport http svod ${URL_PLACEHOLDER} \\\n  --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"`,
     note: "One command, nothing to edit. This is the path we test against.",
     docs: "https://code.claude.com/docs/en/mcp",
   },
@@ -48,8 +48,8 @@ export const CLIENTS: Client[] = [
     family: "cli",
     format: "toml",
     path: "~/.codex/config.toml",
-    snippet: `[mcp_servers.mozg]\nurl = "${URL_PLACEHOLDER}"\nbearer_token_env_var = "MOZG_TOKEN"`,
-    note: "Reads the token from an environment variable rather than the file — export MOZG_TOKEN in your shell profile.",
+    snippet: `[mcp_servers.svod]\nurl = "${URL_PLACEHOLDER}"\nbearer_token_env_var = "SVOD_TOKEN"`,
+    note: "Reads the token from an environment variable rather than the file — export SVOD_TOKEN in your shell profile.",
     docs: "https://developers.openai.com/codex/mcp",
   },
   {
@@ -58,7 +58,7 @@ export const CLIENTS: Client[] = [
     vendor: "Moonshot",
     family: "cli",
     format: "command",
-    snippet: `kimi mcp add --transport http \\\n  --header "Authorization:Bearer ${TOKEN_PLACEHOLDER}" \\\n  mozg ${URL_PLACEHOLDER}`,
+    snippet: `kimi mcp add --transport http \\\n  --header "Authorization:Bearer ${TOKEN_PLACEHOLDER}" \\\n  svod ${URL_PLACEHOLDER}`,
     note: "Config lands in ~/.kimi/mcp.json. Note the header takes no space after the colon.",
     docs: "https://github.com/MoonshotAI/kimi-cli/blob/main/docs/en/reference/kimi-mcp.md",
   },
@@ -71,7 +71,7 @@ export const CLIENTS: Client[] = [
     path: "~/.qwen/settings.json",
     snippet: `{
   "mcpServers": {
-    "mozg": {
+    "svod": {
       "httpUrl": "${URL_PLACEHOLDER}",
       "headers": { "Authorization": "Bearer ${TOKEN_PLACEHOLDER}" },
       "timeout": 30000
@@ -90,13 +90,13 @@ export const CLIENTS: Client[] = [
     path: "~/.cursor/mcp.json  ·  or .cursor/mcp.json per project",
     snippet: `{
   "mcpServers": {
-    "mozg": {
+    "svod": {
       "url": "${URL_PLACEHOLDER}",
       "headers": { "Authorization": "Bearer ${TOKEN_PLACEHOLDER}" }
     }
   }
 }`,
-    note: "Supports ${env:MOZG_TOKEN} in place of the token if you would rather not keep it in the file.",
+    note: "Supports ${env:SVOD_TOKEN} in place of the token if you would rather not keep it in the file.",
     docs: "https://cursor.com/docs/mcp",
   },
   {
@@ -108,7 +108,7 @@ export const CLIENTS: Client[] = [
     path: ".vscode/mcp.json",
     snippet: `{
   "servers": {
-    "mozg": {
+    "svod": {
       "type": "http",
       "url": "${URL_PLACEHOLDER}",
       "headers": { "Authorization": "Bearer ${TOKEN_PLACEHOLDER}" }
@@ -127,7 +127,7 @@ export const CLIENTS: Client[] = [
     path: "cline_mcp_settings.json  ·  via the MCP Servers panel",
     snippet: `{
   "mcpServers": {
-    "mozg": {
+    "svod": {
       "type": "streamableHttp",
       "url": "${URL_PLACEHOLDER}",
       "headers": { "Authorization": "Bearer ${TOKEN_PLACEHOLDER}" }
@@ -145,7 +145,7 @@ export const CLIENTS: Client[] = [
     path: "Settings → Connectors → Add custom connector",
     snippet: `{
   "mcpServers": {
-    "mozg": {
+    "svod": {
       "url": "${URL_PLACEHOLDER}",
       "headers": { "Authorization": "Bearer ${TOKEN_PLACEHOLDER}" }
     }
@@ -163,7 +163,7 @@ export function renderSnippet(client: Client, url: string, token: string): strin
 
 /**
  * Models people ask about that are not clients. Listing them stops the
- * "does mozg support Kimi?" question, which is really "which client do I run
+ * "does svod support Kimi?" question, which is really "which client do I run
  * Kimi in?".
  */
 export interface ModelNote {

@@ -26,7 +26,7 @@ export default function TokenForm({ bases }: { bases: ScopeBase[] }) {
   );
 
   if (state && "token" in state) {
-    const command = `claude mcp add --transport http mozg ${origin}/mcp --header "Authorization: Bearer ${state.token}"`;
+    const command = `claude mcp add --transport http svod ${origin}/mcp --header "Authorization: Bearer ${state.token}"`;
     return (
       <section className="term" style={{ marginTop: "1.5rem" }}>
         <div className="term-bar">
@@ -42,7 +42,7 @@ export default function TokenForm({ bases }: { bases: ScopeBase[] }) {
           className="btn"
           style={{
             background: copied ? "var(--color-riso-green)" : "var(--color-riso-yellow)",
-            color: "var(--ink)",
+            color: "#0b0d10",
             borderColor: copied ? "var(--color-riso-green)" : "var(--color-riso-yellow)",
           }}
           onClick={async () => {
@@ -70,7 +70,8 @@ export default function TokenForm({ bases }: { bases: ScopeBase[] }) {
             flex: 1,
             minWidth: 240,
             padding: ".7rem .85rem",
-            border: "1.5px solid var(--ink)",
+            border: "1px solid var(--rule)",
+            color: "var(--ink)",
             background: "var(--paper-2)",
             font: "inherit",
           }}
@@ -84,7 +85,7 @@ export default function TokenForm({ bases }: { bases: ScopeBase[] }) {
         {t("May create project bases (stable project_id, separate grant, default off)")}
       </label>
       {bases.length > 0 ? (
-        <fieldset style={{ border: "1.5px solid var(--ink)", padding: ".7rem .85rem" }}>
+        <fieldset style={{ border: "1px solid var(--rule)", padding: ".7rem .85rem" }}>
           <legend className="mono" style={{ fontSize: ".75rem" }}>
             {t("Bases this token may open (default deny — pick each)")}
           </legend>

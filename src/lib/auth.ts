@@ -61,7 +61,7 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, url }) => {
       await sendMail({
         to: user.email,
-        subject: "Reset your mozg password",
+        subject: "Reset your svod password",
         text:
           `Someone — hopefully you — asked to reset the password for ${user.email}.\n\n` +
           `Reset it here:\n${url}\n\n` +
@@ -76,12 +76,12 @@ export const auth = betterAuth({
     sendVerificationEmail: async ({ user, url }) => {
       await sendMail({
         to: user.email,
-        subject: "Confirm your mozg address",
+        subject: "Confirm your svod address",
         text:
           "One click and your account is live — brains shared with this " +
           "address start working the moment it is confirmed:\n\n" +
           `${url}\n\n` +
-          "If you did not sign up at mozg.sh, ignore this mail.",
+          "If you did not ask for a svod account, ignore this mail.",
       });
     },
   },

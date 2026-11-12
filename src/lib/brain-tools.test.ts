@@ -13,7 +13,7 @@ test("a declared tool survives the round trip", () => {
   ]);
   assert.equal(tool.name, "spine");
   assert.equal(tool.needs, "Spine 4.2+ desktop app (licensed) on this machine");
-  assert.equal(tool.plugin, "mozg");
+  assert.equal(tool.plugin, "svod");
 });
 
 // ─── the install line ───────────────────────────────────────────────────────
@@ -119,21 +119,21 @@ test("a long field cannot flood the brief", () => {
 
 test("the block says whose words these are and who runs them", () => {
   const text = describeTools(
-    parseTools([{ name: "spine", what: "rigs skeletons", plugin: "mozg" }]),
+    parseTools([{ name: "spine", what: "rigs skeletons", plugin: "svod" }]),
   ).join("\n");
 
-  // mozg does not run these and cannot see them — both have to be said, or an
+  // svod does not run these and cannot see them — both have to be said, or an
   // agent reads the block as a promise the server is making.
   // Wrap-tolerant: the block is hard-wrapped for a terminal, so a sentence
   // spanning two lines is normal and must not fail the check that it is said.
   const flat = text.replace(/\s+/g, " ");
-  assert.match(flat, /run on your machine, not on mozg/);
-  assert.match(flat, /mozg still cannot see what you have connected/);
+  assert.match(flat, /run on your machine, not on svod/);
+  assert.match(flat, /svod still cannot see what you have connected/);
   // The command is a suggestion to put to a human, never a thing to run.
   assert.match(flat, /rather than running it on your own say-so/);
   assert.match(flat, /written by the brain's owner/);
   // And the command, when there is one, is ours rather than the owner's.
-  assert.match(flat, /any add command is mozg's own/);
+  assert.match(flat, /any add command is svod's own/);
   // And it has to change behaviour, not just inform: use the tool instead of
   // following the by-hand notes past it.
   assert.match(flat, /if one of these is already connected, use it/);

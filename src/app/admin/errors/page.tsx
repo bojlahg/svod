@@ -12,7 +12,7 @@ import { resolveErrors } from "../actions";
 export const dynamic = "force-dynamic";
 export async function generateMetadata() {
   const t = await translator();
-  return { title: t("Errors — mozg admin") };
+  return { title: t("Errors — svod admin") };
 }
 
 /**
@@ -88,7 +88,7 @@ export default async function AdminErrorsPage() {
   // Not translated, deliberately: this text is copied into an agent, not read
   // on the page. Same audience as /machine.txt.
   const report = [
-    `mozg errors — ${open} open across ${groups.length} kind${groups.length === 1 ? "" : "s"}`,
+    `svod errors — ${open} open across ${groups.length} kind${groups.length === 1 ? "" : "s"}`,
     `captured ${new Date().toISOString().slice(0, 16).replace("T", " ")}Z · ${process.env.GIT_SHA ?? "unknown build"}`,
     ...groups.flatMap((g) => {
       const mine = byGroup.get(`${g.source}/${g.kind}`) ?? [];
@@ -155,7 +155,7 @@ export default async function AdminErrorsPage() {
       {groups.map((g) => (
         <details
           key={`${g.source}/${g.kind}`}
-          style={{ border: "1.5px solid var(--ink)", background: "var(--paper-2)", marginBottom: "1rem" }}
+          style={{ border: "1px solid var(--rule)", background: "var(--paper-2)", marginBottom: "1rem" }}
         >
           <summary style={{ padding: ".7rem 1rem", cursor: "pointer", display: "flex", gap: "1rem", alignItems: "baseline" }}>
             <strong className="mono">

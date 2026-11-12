@@ -1,19 +1,19 @@
-# mozg plugin for Claude Code
+# svod plugin for Claude Code
 
-Connects your knowledge brains to the agent over MCP.
+Connects your knowledge bases to the agent over MCP.
 
 ## Install
 
 ```bash
-/plugin marketplace add egorfedorov/mozg-plugin
-/plugin install mozg@mozg
+/plugin marketplace add bojlahg/svod
+/plugin install svod@svod
 ```
 
-Then set your token — make one at <https://mozg.sh/connect>, which fills it into
+Then set your token — make one at `/settings/tokens`, which fills it into
 the command for you:
 
 ```bash
-export MOZG_TOKEN=mzg_...
+export SVOD_TOKEN=...
 ```
 
 Put that line in your shell profile so it survives a new terminal. Restart

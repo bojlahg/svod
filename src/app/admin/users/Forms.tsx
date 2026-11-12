@@ -12,7 +12,7 @@ import {
 
 const field: React.CSSProperties = {
   padding: ".55rem .7rem",
-  border: "1.5px solid var(--ink)",
+  border: "1px solid var(--rule)",
   background: "var(--paper-2)",
   font: "inherit",
   fontSize: ".875rem",

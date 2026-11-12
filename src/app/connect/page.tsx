@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata() {
   const t = await translator();
   return {
-    title: t("Connect a brain — mozg"),
+    title: t("Connect a brain — svod"),
     description: t("Exact configuration for Claude Code, Codex, Kimi CLI, Qwen Code, Cursor, VS Code, Cline and Claude Desktop."),
   };
 }
@@ -41,7 +41,7 @@ export default async function ConnectPage() {
           <p className="eyebrow" style={{ marginBottom: ".5rem" }}>
             {t("First, the thing everyone asks")}</p>
           <p style={{ margin: 0, color: "var(--ink-2)" }}>
-            {markup(t("<0>MCP is a client feature, not a model feature.</0> Kimi, DeepSeek, GLM and Qwen are models. You run them inside one of the clients on this page, and the brain connects to the client. Asking whether mozg \"supports DeepSeek\" is really asking which client you run DeepSeek in."), [
+            {markup(t("<0>MCP is a client feature, not a model feature.</0> Kimi, DeepSeek, GLM and Qwen are models. You run them inside one of the clients on this page, and the brain connects to the client. Asking whether svod \"supports DeepSeek\" is really asking which client you run DeepSeek in."), [
             <strong style={{ color: "var(--ink)" }} key="s0" />,
           ])}</p>
         </aside>
@@ -63,9 +63,9 @@ export default async function ConnectPage() {
               wordBreak: "break-word",
             }}
           >
-{`/plugin marketplace add egorfedorov/mozg-plugin
-/plugin install mozg@mozg
-export MOZG_TOKEN=mzg_...`}
+{`/plugin marketplace add bojlahg/svod
+/plugin install svod@svod
+export SVOD_TOKEN=...`}
           </pre>
           <p style={{ color: "var(--ink-2)", margin: 0, fontSize: ".9375rem" }}>
             {markup(t("It brings the MCP connection and workspace commands for listing, searching, reading and writing bases. Make the token below — the button fills it into the command."), [])}</p>
@@ -100,7 +100,7 @@ export MOZG_TOKEN=mzg_...`}
           </div>
 
           <p className="mono" style={{ fontSize: ".75rem", color: "var(--ink-3)", marginTop: ".75rem", maxWidth: "68ch" }}>
-            {t("These run on your machine and mozg never runs them. Some want something installed first — a licensed app, a binary — and the brain that names one says which. Nothing here shares a licence or a key between people.")}
+            {t("These run on your machine and svod never runs them. Some want something installed first — a licensed app, a binary — and the brain that names one says which. Nothing here shares a licence or a key between people.")}
           </p>
         </section>
 
@@ -195,7 +195,7 @@ export MOZG_TOKEN=mzg_...`}
           <pre
             className="mono"
             style={{
-              border: "1.5px solid var(--ink)",
+              border: "1px solid var(--rule)",
               background: "var(--paper-2)",
               padding: "1rem 1.25rem",
               fontSize: ".8125rem",

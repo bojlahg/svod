@@ -56,17 +56,24 @@ test("empty base entry point offers .md upload to editors", async () => {
   const src = readFileSync(join(__dirname, "..", "app", "brains", "[slug]", "page.tsx"), "utf8");
   const emptyMarker = src.indexOf("Select a note on the left");
   assert.ok(emptyMarker !== -1);
-  const selectedUpload = src.indexOf("canEdit && selected && !editing");
-  assert.ok(selectedUpload !== -1);
-  // An upload control lives in the empty/base view (before the selected-only
-  // upload section), so a fresh base can receive its first .md.
-  const emptyUpload = src.indexOf("SvodUpload", emptyMarker);
-  assert.ok(emptyUpload !== -1 && emptyUpload < selectedUpload, "empty view must render SvodUpload");
-  // Gated on canEdit: the nearest gate before it opens after the empty marker.
-  const gate = src.lastIndexOf("{canEdit && (", emptyUpload);
-  assert.ok(gate > emptyMarker, "empty-view upload stays editor-only");
-  // No selected note there: folder falls back from focused folder to root.
-  assert.match(src.slice(emptyMarker, selectedUpload), /currentFolder=\{validFolderFocus\}/);
+  // Empty view points editors at base management instead of rendering the
+  // upload inline, so import/export/index no longer crowd the reader.
+  assert.match(src.slice(emptyMarker), /\?view=manage/);
+  // Manage stays readable to all canRead (export API is canRead): no
+  // whole-view canEdit 404; review still gates its own view.
+  assert.ok(!/if \(view === "manage" && !canEdit\) notFound\(\)/.test(src), "manage must not 404 for readers");
+  assert.match(src, /if \(view === "review" && !canReview\) notFound\(\)/);
+  // Mutations stay editor-only inside manage (import/upload/index forms gated
+  // by canEdit) with the focused folder falling back to root.
+  assert.match(src, /\{canEdit && \(\s*<div[^>]*>\s*<h2>\{t\("Import"\)/);
+  assert.match(src, /SvodIndexRefreshForm/);
+  assert.match(src, /SvodAutoIndexForm/);
+  assert.match(src, /\{canReview && \(\s*<div className="svod-ws-row">/);
+  const manageMarker = src.indexOf('aria-label={t("Base management")}');
+  assert.ok(manageMarker !== -1);
+  const uploadInManage = src.indexOf("SvodUpload", manageMarker);
+  assert.ok(uploadInManage !== -1, "management view must render SvodUpload");
+  assert.match(src.slice(manageMarker, uploadInManage + 200), /currentFolder=\{validFolderFocus\}/);
 });
 
 test("reader can only view: policy denies mutations", () => {

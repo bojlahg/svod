@@ -1,10 +1,13 @@
 "use client";
 
 import { useT } from "@/lib/t-client";
-import { useActionState, useState, type FormEvent } from "react";
+import { useActionState, useEffect, useState, type FormEvent } from "react";
 import { MARKDOWN_HELP_EXAMPLES } from "@/lib/svod-markdown";
 import SvodMarkdown from "@/components/SvodMarkdown";
 import { approveNote, editProposalAction } from "./review-actions";
+import {
+  setSvodUnsavedDraft,
+} from "./svod-draft-guard";
 
 /**
  * SVOD stage 4 reviewer form: edit a pending proposal (shared Markdown
@@ -57,6 +60,15 @@ export default function ProposalReviewForm({
     | { error: string; current?: { title: string; body: string; revision: number } | null }
   >(null);
   const [approveState, approveAction, approvePending] = useActionState(approveNote, null);
+  // Unsaved guard for reviewer text: dirty until the edit/rebase save or the
+  // acceptance succeeds. Saved snapshot advances only on successful save so
+  // typing during the request stays dirty; failures keep the draft.
+  const [saved, setSaved] = useState({ title: initialTitle, body: initialBody });
+  const dirty = title !== saved.title || body !== saved.body;
+  useEffect(() => {
+    setSvodUnsavedDraft(dirty);
+    return () => setSvodUnsavedDraft(false);
+  }, [dirty, proposalId]);
 
   // The save action is awaited directly rather than through the useActionState
   // dispatcher: the awaited return settles with the response, so a finished
@@ -66,12 +78,14 @@ export default function ProposalReviewForm({
   async function onEditSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const submitted = { title, body };
     setEditPending(true);
     try {
       const res = await editProposalAction(null, fd);
       setEditResult(res);
       if (res && "ok" in res && "revision" in res && typeof res.revision === "number") {
         setExpectedRev(res.revision);
+        setSaved({ title: submitted.title, body: submitted.body });
       }
     } catch {
       setEditResult({ error: t("Could not save. Check the connection and retry.") });
@@ -108,6 +122,7 @@ export default function ProposalReviewForm({
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              disabled={approvePending}
               style={{ padding: ".45rem .55rem", background: "#0b0d10", border: "1px solid #2a2e35", borderRadius: 4, color: "#e6e8ea", font: "inherit" }}
             />
           </label>
@@ -117,6 +132,7 @@ export default function ProposalReviewForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={6}
+              disabled={approvePending}
               style={{ padding: ".5rem .6rem", background: "#0b0d10", border: "1px solid #2a2e35", borderRadius: 4, color: "#e6e8ea", font: "inherit", fontFamily: "ui-monospace, Menlo, monospace", fontSize: ".8125rem" }}
             />
           </label>
@@ -133,7 +149,7 @@ export default function ProposalReviewForm({
             <input type="hidden" name="body" value={body} />
             <input type="hidden" name="expectedProposalRevision" value={expectedRev} />
             <input type="hidden" name="expectedTargetRevision" value={targetRevision ?? ""} />
-            <button className="svod-btn-ghost" type="submit" disabled={editPending}>
+            <button className="svod-btn-ghost" type="submit" disabled={editPending || approvePending}>
               {editPending ? t("Saving…") : t("Save edit / rebase")}
             </button>
           </form>
@@ -148,15 +164,18 @@ export default function ProposalReviewForm({
         </div>
       </details>
 
-      <form action={approveAction} style={{ display: "flex", gap: ".4rem", flexWrap: "wrap", alignItems: "center" }}>
+      <form
+        action={approveAction}
+        style={{ display: "flex", gap: ".4rem", flexWrap: "wrap", alignItems: "center" }}
+      >
         <input type="hidden" name="id" value={proposalId} />
         <input type="hidden" name="slug" value={slug} />
         <input type="hidden" name="title" value={title} />
         <input type="hidden" name="body" value={body} />
-        <input type="hidden" name="expectedProposalRevision" value={proposalRevision} />
+        <input type="hidden" name="expectedProposalRevision" value={expectedRev} />
         <input type="hidden" name="expectedSourceBrainId" value={expectedSourceBrainId} />
         {bases.length > 1 && (
-          <label className="mono" style={{ fontSize: ".6875rem" }}>
+          <label style={{ fontSize: ".8125rem" }}>
             {t("Destination base")}
             <select
               name="destBrainId"
@@ -176,7 +195,7 @@ export default function ProposalReviewForm({
             </select>
           </label>
         )}
-        <label className="mono" style={{ fontSize: ".6875rem" }}>
+        <label style={{ fontSize: ".8125rem" }}>
           {t("Destination folder")}
           <select name="destFolderId" value={destFolder} onChange={(e) => setDestFolder(e.target.value)} style={{ marginLeft: ".3rem" }}>
             {crossBase ? (
@@ -201,7 +220,7 @@ export default function ProposalReviewForm({
             )}
           </select>
         </label>
-        <button className="svod-btn-ghost" type="submit" disabled={approvePending}>
+        <button className="svod-btn-ghost" type="submit" disabled={editPending || approvePending}>
           {approvePending ? t("Approving…") : t("Approve")}
         </button>
       </form>

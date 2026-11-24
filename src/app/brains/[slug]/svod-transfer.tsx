@@ -2,6 +2,10 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { useT } from "@/lib/t-client";
+import {
+  clearSvodUnsavedDraftForNavigation,
+  hasSvodUnsavedDraft,
+} from "./svod-draft-guard";
 
 interface PreviewAdd {
   id: string | null;
@@ -102,6 +106,12 @@ export function SvodImportForm({ brainId }: { brainId: string }) {
 
   async function runCommit(decision: "update" | "skip") {
     if (!staged.length) return;
+    if (hasSvodUnsavedDraft()) {
+      const ok = window.confirm(
+        t("You have unsaved changes. Leave without saving?"),
+      );
+      if (!ok) return;
+    }
     setPending(true);
     try {
       const res = await fetch(`/api/brains/${brainId}/svod-import?phase=commit&decision=${decision}`, {
@@ -127,6 +137,7 @@ export function SvodImportForm({ brainId }: { brainId: string }) {
       // Stay on the page while there are per-note errors to show; a clean
       // import reloads the whole document like the other tree operations.
       if (data.errors && data.errors.length > 0) return;
+      clearSvodUnsavedDraftForNavigation();
       window.location.reload();
     } catch {
       setResult({ error: t("Could not import the archive.") });
@@ -172,7 +183,7 @@ export function SvodImportForm({ brainId }: { brainId: string }) {
       ) : null}
       {result && !("error" in (result as object)) ? (
         <div style={{ display: "grid", gap: ".4rem", fontSize: ".8125rem", color: "#9aa3af" }}>
-          <p className="mono" style={{ margin: 0 }}>
+          <p style={{ margin: 0, fontSize: ".8125rem" }}>
             {t("Will add")}: {(result.adds ?? []).length} · {t("Matches")}: {(result.matches ?? []).length} ·{" "}
             {t("Conflicts")}: {(result.conflicts ?? []).length}
             {typeof result.added === "number" ? ` · ${t("Added")}: ${result.added} · ${t("Updated")}: ${result.updated}` : ""}

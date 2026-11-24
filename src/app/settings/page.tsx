@@ -21,9 +21,7 @@ export default async function SettingsPage() {
 
   return (
     <AppShell active="/settings" eyebrow={user.email} title={t("Profile")}>
-      <section>
-        <h2 className="h2" style={{ marginBottom: ".75rem" }}>
-          {t("Profile")}</h2>
+      <section aria-label={t("Profile")}>
         <ProfileForm name={user.name ?? ""} handle={user.handle ?? ""} />
       </section>
 

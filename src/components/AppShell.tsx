@@ -89,12 +89,12 @@ export default async function AppShell({
         <input type="checkbox" id="app-nav-open" className="app-nav-check" aria-label={t("Menu")} />
 
         <div className="app-rail-head">
-          <Link href="/" className="wordmark" style={{ fontSize: "1.25rem" }}>
+          <Link href="/" className="wordmark">
             {markup(t("svod<0>.</0>"), [
             <span key="s0" />,
           ])}</Link>
 
-          <label htmlFor="app-nav-open" className="app-burger mono">
+          <label htmlFor="app-nav-open" className="app-burger">
             <span className="app-burger-shut">{t("☰ menu")}</span>
             <span className="app-burger-open">{t("✕ close")}</span>
           </label>

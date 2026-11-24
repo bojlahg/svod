@@ -427,10 +427,10 @@ test("token UI never renders plaintext of an existing token", async () => {
 test("reviewer UI submits shown versions and displays current on conflict", async () => {
   const page = readFileSync(join(__dirname, "..", "app", "brains", "[slug]", "page.tsx"), "utf8");
   // Sidebar is compact (no per-row comparison/forms); full comparison lives in
-  // the selected right-pane proposal view with complete bodies.
+  // the review-mode main pane with complete bodies side by side.
   assert.ok(!/Show original \/ proposed changes/.test(page), "sidebar comparison removed (compact queue)");
-  assert.match(page, /Current accepted \(full\)/);
-  assert.match(page, /Proposed \(full\)/);
+  assert.match(page, /Current version/);
+  assert.match(page, /Proposed version/);
   assert.match(page, /pendingPage/);
   assert.match(page, /Older/);
   assert.match(page, /proposalRevision=\{selected\.revision\}/);

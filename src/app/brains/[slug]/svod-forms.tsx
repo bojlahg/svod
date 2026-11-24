@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef, useState, type FormEvent } from "react";
+import { useActionState, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "@/lib/t-client";
 import {
@@ -11,6 +11,10 @@ import {
   refreshSvodIndexAction,
   setSvodAutoIndexAction,
 } from "./svod-actions";
+import {
+  clearSvodUnsavedDraftForNavigation,
+  hasSvodUnsavedDraft,
+} from "./svod-draft-guard";
 
 type ActionState = { error?: string; ok?: boolean } | null;
 
@@ -53,6 +57,18 @@ export function useSvodWorkspaceSubmit<R extends { ok?: unknown; error?: unknown
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busyRef.current) return;
+    // Tree ops hard-reload the document on success: a dirty editor draft
+    // would vanish with the reload, so confirm first (note saves keep the
+    // draft in state and need no guard here). The flag is only cleared right
+    // before the legitimate reload — a failed op keeps the draft guarded.
+    if (HARD_RELOAD_OPS.has(op) && typeof window !== "undefined") {
+      if (hasSvodUnsavedDraft()) {
+        const ok = window.confirm(
+          t("You have unsaved changes. Leave without saving?"),
+        );
+        if (!ok) return;
+      }
+    }
     busyRef.current = true;
     setPending(true);
     try {
@@ -95,8 +111,12 @@ export function useSvodWorkspaceSubmit<R extends { ok?: unknown; error?: unknown
         } as R | { error: string });
       } else {
         setResult(data as R | { error: string });
-        if ("ok" in data && (data as { ok?: unknown }).ok) {
+        if (
+          "ok" in data &&
+          (data as { ok?: unknown }).ok === true
+        ) {
           if (HARD_RELOAD_OPS.has(op)) {
+            clearSvodUnsavedDraftForNavigation();
             window.location.reload();
           } else {
             router.refresh();
@@ -114,6 +134,16 @@ export function useSvodWorkspaceSubmit<R extends { ok?: unknown; error?: unknown
   return { pending, result, onSubmit };
 }
 
+const fieldStyle: CSSProperties = {
+  width: "100%",
+  padding: ".7rem .85rem",
+  border: "1px solid var(--rule)",
+  background: "var(--paper)",
+  color: "var(--ink)",
+  font: "inherit",
+  fontSize: "1rem",
+};
+
 function ErrorLine({ state }: { state: ActionState }) {
   if (!state || !("error" in state) || !state.error) return null;
   return (
@@ -126,9 +156,11 @@ function ErrorLine({ state }: { state: ActionState }) {
 export function SvodBaseRenameForm({
   brainId,
   initialTitle,
+  initialGoal,
 }: {
   brainId: string;
   initialTitle: string;
+  initialGoal: string;
 }) {
   const t = useT();
   const [fallbackState, fallbackAction, fallbackPending] = useActionState(
@@ -139,18 +171,42 @@ export function SvodBaseRenameForm({
   const pending = direct.pending || fallbackPending;
   const state = (direct.result as ActionState) ?? fallbackState;
   return (
-    <form action={fallbackAction} onSubmit={direct.onSubmit} style={{ display: "flex", gap: ".35rem", marginBottom: ".6rem" }}>
+    <form
+      action={fallbackAction}
+      onSubmit={direct.onSubmit}
+      className="panel"
+      style={{ display: "grid", gap: "1.25rem", marginTop: "1.75rem" }}
+    >
       <input type="hidden" name="brainId" value={brainId} />
-      <input
-        name="title"
-        defaultValue={initialTitle}
-        required
-        maxLength={80}
-        aria-label={t("Rename base")}
-        className="svod-input svod-input-sm"
-      />
-      <button className="svod-btn-ghost" type="submit" disabled={pending}>
-        {pending ? t("Saving…") : t("Rename base")}
+      <label style={{ display: "grid", gap: ".4rem" }}>
+        <span style={{ fontWeight: 600 }}>{t("Name")}</span>
+        <span className="mono" style={{ fontSize: ".75rem", color: "var(--ink-2)" }}>
+          {t("The name you and your agents will see.")}
+        </span>
+        <input
+          name="title"
+          defaultValue={initialTitle}
+          required
+          maxLength={80}
+          style={fieldStyle}
+        />
+      </label>
+      <label style={{ display: "grid", gap: ".4rem" }}>
+        <span style={{ fontWeight: 600 }}>{t("Description (optional)")}</span>
+        <span className="mono" style={{ fontSize: ".75rem", color: "var(--ink-2)" }}>
+          {t("A short note about what this base holds.")}
+        </span>
+        <textarea
+          name="goal"
+          defaultValue={initialGoal}
+          rows={4}
+          maxLength={4000}
+          placeholder={t("What this base is for.")}
+          style={fieldStyle}
+        />
+      </label>
+      <button className="btn" type="submit" disabled={pending} style={{ justifySelf: "start" }}>
+        {pending ? t("Saving…") : t("Save")}
       </button>
       <ErrorLine state={state} />
     </form>

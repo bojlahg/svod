@@ -5,7 +5,6 @@ import { fill } from "@/lib/markup";
 import { query } from "@/db";
 import type { Note } from "@/db/types";
 import { currentUser } from "@/lib/session";
-import { isAdmin } from "@/lib/admin";
 import {
   listFolders,
   buildFolderTree,
@@ -21,15 +20,15 @@ import { getSvodIndexStatus } from "@/lib/svod-index";
 import SvodMarkdown from "@/components/SvodMarkdown";
 import SvodEditor from "./svod-editor";
 import SvodUpload from "./svod-upload";
-import ConfirmForm from "@/components/ConfirmForm";
-import { deleteSvodNoteAction } from "./svod-actions";
+import SvodBasePicker from "./svod-base-picker";
+import SvodMobileBar from "./svod-mobilebar";
+import SvodNavGuard from "./svod-nav-guard";
+import SvodNoteMenu from "./svod-note-menu";
 import {
   SvodAutoIndexForm,
-  SvodBaseRenameForm,
   SvodFolderCreateForm,
   SvodFolderRenameForm,
   SvodIndexRefreshForm,
-  SvodNoteMoveForm,
 } from "./svod-forms";
 import { rejectNote } from "./review-actions";
 import ProposalReviewForm from "./proposal-review-form";
@@ -58,6 +57,7 @@ interface SearchParams {
   edit?: string | string[];
   new?: string | string[];
   pendingPage?: string | string[];
+  view?: string | string[];
 }
 
 export default async function SvodWorkspacePage({
@@ -79,7 +79,13 @@ export default async function SvodWorkspacePage({
   const brain = access.brain;
   const canEdit = access.canEdit;
   const canReview = access.canReview;
-  const operator = isAdmin(user);
+
+  const viewRaw = firstParam(raw.view).trim().toLowerCase();
+  const view: "notes" | "review" | "manage" =
+    viewRaw === "review" ? "review" : viewRaw === "manage" ? "manage" : "notes";
+  if (view === "review" && !canReview) notFound();
+  // Manage is readable by all canRead (export API is canRead): mutations and
+  // review-gated rows are gated inside the view, never by a whole-view 404.
 
   const q = firstParam(raw.q).trim().slice(0, 200);
   const selectedRaw = firstParam(raw.note).trim();
@@ -134,8 +140,8 @@ export default async function SvodWorkspacePage({
     })),
   ]);
 
-  // Embed fingerprint for the status line (read-only; never blocks the page).
-  // While the model is still loading Markdown stays readable and editable.
+  // Embed fingerprint for the management diagnostics (read-only; never blocks
+  // the page). While the model is still loading Markdown stays readable.
   let embedNote: string | null = null;
   let embedReady = false;
   try {
@@ -181,6 +187,16 @@ export default async function SvodWorkspacePage({
     }
     if (!selected) notFound();
     if (selected.status === "pending" && !canReview) notFound();
+    // Stable pending-note links (?note=<pendingID>) default to review for
+    // authorized reviewers when no explicit view was given; active links pass
+    // through unchanged and strangers still 404 above.
+    if (selected.status === "pending" && canReview && view === "notes") {
+      const params = new URLSearchParams();
+      params.set("view", "review");
+      params.set("note", selected.id);
+      if (q) params.set("q", q);
+      redirect(`/brains/${brain.id}?${params.toString()}`);
+    }
   }
 
   const searchHits = q ? await searchSvodNotes(brain.id, q, 20) : [];
@@ -202,6 +218,9 @@ export default async function SvodWorkspacePage({
   }
 
   const selectedPath = selected ? folderPath(folders, selected.folder_id) : "";
+  const focusPath = validFolderFocus
+    ? folderPath(folders, validFolderFocus)
+    : "";
   const baseHref = `/brains/${brain.id}`;
 
   const noteLink = (id: string) =>
@@ -312,461 +331,572 @@ export default async function SvodWorkspacePage({
     for (const [bid, list] of fetched) foldersByBrain[bid] = list;
   }
 
+  const showEditor =
+    view === "notes" &&
+    ((creating && canEdit) ||
+      (editing && canEdit && selected?.status === "active"));
+  const indexHasError =
+    indexStatus.errorChunks > 0 || Boolean(indexStatus.lastError);
+  const crumbs = selected
+    ? `${brain.title} / ${selectedPath || t("Base root")} / ${selected.title}`
+    : creating
+      ? `${brain.title} / ${t("New note")}`
+      : view === "review"
+        ? `${brain.title} / ${t("Proposals")}`
+        : view === "manage"
+          ? `${brain.title} / ${t("Base management")}`
+          : `${brain.title} / ${focusPath || t("Notes")}`;
+
   return (
-    <div className="svod">
-      <a href="#svod-reader" className="svod-skip">
+    <div className="svod-ws" data-focus="off" data-nav="open">
+      <SvodNavGuard />
+      <SvodMobileBar baseTitle={brain.title} />
+      <a href="#svod-main" className="svod-ws-skip">
         {t("Skip to note")}
       </a>
-      <header className="svod-top">
-        <div className="svod-top-left">
-          <Link href="/brains" className="svod-crumb">
-            {t("← Bases")}
+      <aside id="svod-nav" className="svod-ws-side" aria-label={t("Base navigation")}>
+        <div className="svod-ws-brand">
+          <Link href="/brains" className="svod-ws-wordmark">
+            {t("svod")}
           </Link>
-          <h1 className="svod-title">{brain.title}</h1>
-          <span className="svod-role">{access.role ?? ""}</span>
         </div>
-        <nav className="svod-top-nav" aria-label={t("Workspace")}>
-          {operator && <Link href="/admin/users">{t("People")}</Link>}
-          <Link href="/settings/tokens">{t("Tokens")}</Link>
-          {access.canAdmin && <Link href={`/brains/${brain.id}/share`}>{t("Manage base")}</Link>}
-        </nav>
-      </header>
 
-      <div className="svod-status" role="status">
-        <span>
-          {t("active notes")}: {activeNotes.length}
-        </span>
-        <span>
-          {t("pending review")}: {pendingCountRow}
-        </span>
-        <span>
-          {t("awaiting index")}: {indexStatus.pendingNotes}
-        </span>
-        <span>
-          {t("chunks in progress")}: {indexStatus.pendingChunks}
-        </span>
-        <span>
-          {t("index errors")}: {indexStatus.errorChunks}
-        </span>
-        {indexStatus.lastError ? (
-          <span>
-            {t("last index error")}: {indexStatus.lastError.slice(0, 160)}
-          </span>
-        ) : null}
-        {!embedReady ? (
-          <span>
-            {embedNote
-              ? `${t("semantic search unavailable")}: ${embedNote.slice(0, 160)}`
-              : t("embedding model is loading — reading and editing still work")}
-          </span>
-        ) : null}
-      </div>
-
-      {canEdit ? (
-        <div className="svod-index-controls" style={{ display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "center", marginBottom: ".6rem" }}>
-          <SvodIndexRefreshForm brainId={brain.id} />
-          <SvodAutoIndexForm brainId={brain.id} initial={indexStatus.autoIndex} />
+        <div className="svod-ws-base">
+          <SvodBasePicker
+            bases={bases.map((b) => ({ id: b.id, title: b.title, member_role: b.member_role }))}
+            currentId={brain.id}
+          />
+          <Link
+            href={`${baseHref}?view=manage${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+            className="svod-ws-iconbtn"
+            aria-label={t("Base management")}
+            title={t("Base management")}
+            data-active={view === "manage" ? "true" : undefined}
+          >
+            {"⚙"}
+          </Link>
         </div>
-      ) : null}
 
-      <div className="svod-index-controls" style={{ display: "flex", gap: ".75rem", flexWrap: "wrap", alignItems: "center", marginBottom: ".6rem" }}>
-        <a className="svod-btn-ghost" href={`/api/brains/${brain.id}/svod-export?format=full`}>
-          {t("Export full archive")}
-        </a>
-        <a className="svod-btn-ghost" href={`/api/brains/${brain.id}/svod-export?format=markdown`}>
-          {t("Export Markdown")}
-        </a>
-      </div>
-      {canEdit ? <SvodImportForm brainId={brain.id} /> : null}
-
-      <div className="svod-searchrow">
-        <form method="get" action={baseHref} role="search" style={{ display: "flex", gap: ".5rem", flex: 1, minWidth: 0 }}>
+        <form
+          method="get"
+          action={baseHref}
+          role="search"
+          className="svod-ws-search"
+        >
           {selectedId ? <input type="hidden" name="note" value={selectedId} /> : null}
           <input
             name="q"
             defaultValue={q}
-            placeholder={t("Search notes — title and folder path in results")}
+            placeholder={t("Search notes")}
             aria-label={t("Search notes")}
-            className="svod-input"
-            style={{ flex: 1, minWidth: 0 }}
           />
-          <button className="svod-btn" type="submit">
-            {t("Search")}
-          </button>
           {q ? (
-            <Link className="svod-btn-ghost" href={selectedId ? `${baseHref}?note=${selectedId}` : baseHref}>
+            <Link
+              href={selectedId ? `${baseHref}?note=${selectedId}` : baseHref}
+              aria-label={t("Clear search")}
+              style={{ fontSize: ".8125rem" }}
+            >
               {t("Clear")}
             </Link>
           ) : null}
         </form>
-        {canEdit && (
-          <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
-            <Link className="svod-btn" href={`${baseHref}?new=1${validFolderFocus ? `&folder=${validFolderFocus}` : ""}`}>
-              {t("+ Note")}
-            </Link>
-          </div>
-        )}
-      </div>
 
-      {q ? (
-        <section aria-label={t("Search results")} className="svod-results">
-          <p className="mono" style={{ fontSize: ".75rem", color: "#9aa3af", margin: "0 0 .4rem" }}>
-            {searchHits.length === 0 ? t("Nothing matches that.") : `${searchHits.length} ${t("match(es)")}`}
-          </p>
-          {searchHits.map((h) => (
+        {q ? (
+          <section aria-label={t("Search results")} className="svod-ws-results">
+            <p style={{ fontSize: ".75rem", color: "#a1aabc", margin: "0 0 .25rem" }}>
+              {searchHits.length === 0
+                ? t("Nothing matches that.")
+                : `${searchHits.length} ${t("match(es)")}`}
+            </p>
+            {searchHits.map((h) => (
+              <Link
+                key={h.note_id}
+                href={noteLink(h.note_id)}
+                aria-current={selectedId === h.note_id ? "page" : undefined}
+                className="svod-ws-hit"
+                data-active={selectedId === h.note_id ? "true" : undefined}
+              >
+                <strong>{h.title}</strong>
+                <span className="svod-ws-hitpath">
+                  {folderPath(folders, h.folder_id) || t("Base root")}
+                </span>
+                <span className="svod-ws-hitexcerpt">{h.excerpt}</span>
+              </Link>
+            ))}
+          </section>
+        ) : null}
+
+        <div className="svod-ws-sec">
+          <span className="svod-ws-sec-title">
+            {view === "review" ? t("Proposals") : t("Notes")}
+          </span>
+          {view === "notes" && canEdit && (
             <Link
-              key={h.note_id}
-              href={noteLink(h.note_id)}
-              aria-current={selectedId === h.note_id ? "true" : undefined}
-              className="svod-result"
-              data-active={selectedId === h.note_id ? "true" : undefined}
+              href={`${baseHref}?new=1${validFolderFocus ? `&folder=${validFolderFocus}` : ""}`}
+              className="svod-ws-iconbtn"
+              aria-label={t("New note")}
+              title={t("New note")}
             >
-              <strong>{h.title}</strong>
-              <span className="svod-path">{folderPath(folders, h.folder_id) || t("Base root")}</span>
-              <span className="svod-excerpt">{h.excerpt}</span>
+              {"+"}
             </Link>
-          ))}
-        </section>
-      ) : null}
+          )}
+        </div>
 
-      <div className="svod-grid">
-        <nav className="svod-tree" aria-label={t("Bases, folders and notes")}>
-          {bases.map((b) =>
-            b.id === brain.id ? (
-              <details key={b.id} open className="svod-base">
-                <summary className="svod-folder-sum">
+        {view === "review" ? (
+          <nav className="svod-ws-tree" aria-label={t("Proposal queue")}>
+            <Link href={baseHref} className="svod-ws-note">
+              {t("← Back to notes")}
+            </Link>
+            {pendingNotes.map((p) => {
+              const target = p.target_note_id ? targetById.get(p.target_note_id) : null;
+              const active = selectedId === p.id;
+              return (
+                <Link
+                  key={p.id}
+                  href={`${baseHref}?view=review&note=${p.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${pendingPage ? `&pendingPage=${pendingPage}` : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  className="svod-ws-note"
+                  data-active={active ? "true" : undefined}
+                >
+                  {p.title}
+                  <span className="svod-ws-hitpath" style={{ display: "block" }}>
+                    {target
+                      ? `${t("edit of")} ${target.title.slice(0, 40)} · `
+                      : `${t("new note")} · `}
+                    {t("rev")} {p.revision}
+                    {p.token_prefix ? ` · ${p.token_prefix}…` : ""}
+                  </span>
+                </Link>
+              );
+            })}
+            {pendingCountRow > PENDING_PAGE_SIZE && (
+              <div style={{ display: "flex", gap: ".4rem", marginTop: ".4rem", flexWrap: "wrap" }}>
+                {pendingPage > 0 && (
                   <Link
-                    href={`/brains/${b.id}`}
-                    aria-current="page"
-                    className="svod-folder-link"
+                    className="svod-ws-btn"
+                    href={`${baseHref}?view=review&pendingPage=${pendingPage - 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
                   >
-                    <strong>{b.title}</strong> · {b.member_role}
+                    {t("Newer")}
                   </Link>
+                )}
+                {(pendingPage + 1) * PENDING_PAGE_SIZE < pendingCountRow && (
+                  <Link
+                    className="svod-ws-btn"
+                    href={`${baseHref}?view=review&pendingPage=${pendingPage + 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+                  >
+                    {t("Older")}
+                  </Link>
+                )}
+              </div>
+            )}
+          </nav>
+        ) : (
+          <nav className="svod-ws-tree" aria-label={t("Folders and notes")}>
+            <TreeNodes
+              nodes={tree}
+              notesByFolder={notesByFolder}
+              expanded={expanded}
+              selectedId={selectedId}
+              baseHref={baseHref}
+              q={q}
+              canEdit={canEdit}
+              t={t}
+            />
+            <div style={{ display: "grid", gap: ".1rem" }}>
+              {(notesByFolder.get(null) ?? []).map((n) => (
+                <Link
+                  key={n.id}
+                  href={noteLink(n.id)}
+                  aria-current={selectedId === n.id ? "page" : undefined}
+                  className="svod-ws-note"
+                  data-active={selectedId === n.id ? "true" : undefined}
+                >
+                  {n.title}
+                </Link>
+              ))}
+            </div>
+            {canEdit && (
+              <details className="svod-ws-newfolder" style={{ marginTop: ".4rem" }}>
+                <summary style={{ cursor: "pointer" }} aria-label={t("New folder")}>
+                  <span aria-hidden="true">{"+"}</span> {t("New folder")}
                 </summary>
-                <div className="svod-folder-body">
-                  {canEdit && (
-                    <SvodFolderCreateForm brainId={brain.id} slug={brain.slug} parents={[]} compact />
-                  )}
-
-                  {canEdit && <SvodBaseRenameForm brainId={brain.id} initialTitle={brain.title} />}
-
-                  <TreeNodes
-                    nodes={tree}
-                    notesByFolder={notesByFolder}
-                    expanded={expanded}
-                    selectedId={selectedId}
-                    baseHref={baseHref}
-                    q={q}
-                    canEdit={canEdit}
-                    t={t}
-                  />
-                  <div style={{ marginTop: ".6rem" }}>
-                    {(notesByFolder.get(null) ?? []).map((n) => (
-                      <div key={n.id} className="svod-note-row" data-active={selectedId === n.id ? "true" : undefined}>
-                        <Link
-                          href={noteLink(n.id)}
-                          aria-current={selectedId === n.id ? "page" : undefined}
-                          className="svod-note-link"
-                        >
-                          {n.title}
-                        </Link>
-                      </div>
-                    ))}
-                  </div>
-
-                  {canEdit && (
-                    <details className="svod-details">
-                      <summary>{t("Add folder here")}</summary>
-                      <SvodFolderCreateForm
-                        brainId={brain.id}
-                        slug={brain.slug}
-                        parents={formParents}
-                        defaultParent={validFolderFocus ?? ""}
-                      />
-                    </details>
-                  )}
-                </div>
-              </details>
-            ) : (
-              <div key={b.id} className="svod-note-row">
-                <Link href={`/brains/${b.id}`} className="svod-note-link">
-                  {b.title} · {b.member_role}
-                </Link>
-              </div>
-            ),
-          )}
-
-          {canReview && (pendingCountRow > 0) && (
-            <section style={{ marginTop: "1rem" }} aria-label={t("Pending review")}>
-              <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", margin: "0 0 .4rem" }}>
-                {t("Pending review")} · {pendingCountRow}
-                {pendingCountRow > PENDING_PAGE_SIZE ? ` · ${t("page")} ${pendingPage + 1}` : ""}
-              </p>
-              <div style={{ display: "grid", gap: ".3rem" }}>
-                {pendingNotes.map((p) => {
-                  const target = p.target_note_id ? targetById.get(p.target_note_id) : null;
-                  const active = selectedId === p.id;
-                  return (
-                    <div key={p.id} className="svod-note-row" data-active={active ? "true" : undefined}>
-                      <Link
-                        href={`${baseHref}?note=${p.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${pendingPage ? `&pendingPage=${pendingPage}` : ""}`}
-                        aria-current={active ? "page" : undefined}
-                        className="svod-note-link"
-                      >
-                        {p.title}
-                      </Link>
-                      <span className="mono" style={{ display: "block", fontSize: ".625rem", color: "#9aa3af" }}>
-                        {target ? `${t("edit of")} ${target.title.slice(0, 40)} · ` : `${t("new note")} · `}
-                        {t("rev")} {p.revision}
-                        {p.token_prefix ? ` · ${p.token_prefix}…` : ""}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              {pendingCountRow > PENDING_PAGE_SIZE && (
-                <div style={{ display: "flex", gap: ".5rem", marginTop: ".5rem" }}>
-                  {pendingPage > 0 && (
-                    <Link
-                      className="svod-btn-ghost"
-                      href={`${baseHref}?pendingPage=${pendingPage - 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-                    >
-                      {t("Newer")}
-                    </Link>
-                  )}
-                  {(pendingPage + 1) * PENDING_PAGE_SIZE < pendingCountRow && (
-                    <Link
-                      className="svod-btn-ghost"
-                      href={`${baseHref}?pendingPage=${pendingPage + 1}${selectedId ? `&note=${selectedId}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-                    >
-                      {t("Older")}
-                    </Link>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-        </nav>
-
-        <main id="svod-reader" className="svod-reader" tabIndex={-1} aria-label={t("Selected note")}>
-          {creating && canEdit ? (
-            <section>
-              <h2 className="svod-h2">{t("New note")}</h2>
-              <SvodEditor
-                brainId={brain.id}
-                slug={brain.slug}
-                folderId={validFolderFocus}
-                folders={folderOptions}
-                initialTitle=""
-                initialBody=""
-                mode="create"
-              />
-            </section>
-          ) : selected ? (
-            <article>
-              <p className="mono" style={{ fontSize: ".6875rem", color: "#6b7280", margin: "0 0 .3rem" }}>
-                {selectedPath || t("Base root")} ·{" "}
-                <Link href={noteLink(selected.id)} style={{ color: "#6b7280" }}>
-                  {selected.id.slice(0, 8)}
-                </Link>
-                {selected.status === "pending" ? ` · ${t("awaiting review — not searchable")}` : ""}
-              </p>
-              <h2 className="svod-h2">{selected.title}</h2>
-              {editing && canEdit && selected.status === "active" ? (
-                <SvodEditor
+                <SvodFolderCreateForm
                   brainId={brain.id}
                   slug={brain.slug}
-                  noteId={selected.id}
-                  folderId={selected.folder_id}
-                  folders={folderOptions}
-                  initialTitle={selected.title}
-                  initialBody={selected.body}
-                  mode="edit"
+                  parents={formParents}
+                  defaultParent={validFolderFocus ?? ""}
                 />
-              ) : (
-                <>
-                  <SvodMarkdown body={selected.body} />
-                  <div className="svod-note-actions">
-                    {selected.status === "active" && (
-                      <a className="svod-btn-ghost" href={`/api/brains/${brain.id}/notes/${selected.id}/download`}>
-                        {t("Download .md")}
-                      </a>
-                    )}
-                    {canEdit && selected.status === "active" && (
-                      <>
-                        <Link className="svod-btn-ghost" href={`${noteLink(selected.id)}&edit=1`}>
-                          {t("Edit")}
-                        </Link>
-                        <SvodNoteMoveForm
-                          brainId={brain.id}
-                          slug={brain.slug}
-                          noteId={selected.id}
-                          currentFolder={selected.folder_id}
-                          folders={moveFolders}
-                        />
-                        <ConfirmForm
-                          action={deleteSvodNoteAction}
-                          message={t("Delete this note? This cannot be undone.")}
-                        >
-                          <input type="hidden" name="brainId" value={brain.id} />
-                          <input type="hidden" name="slug" value={brain.slug} />
-                          <input type="hidden" name="noteId" value={selected.id} />
-                          <button className="svod-danger" type="submit">
-                            {t("Delete")}
-                          </button>
-                        </ConfirmForm>
-                      </>
-                    )}
-                    {canReview && selected.status === "pending" && (
-                      <section style={{ marginTop: "1.5rem", display: "grid", gap: ".75rem" }} aria-label={t("Proposal review")}>
-                        <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", margin: 0 }}>
-                          {selectedProposalMeta?.token_prefix
-                            ? `${t("via token")} ${selectedProposalMeta.token_prefix}…`
-                            : t("via web")}
-                          {` · ${t("rev")} ${selected.revision}`}
-                          {selected.target_note_id
-                            ? ` · target ${selected.target_note_id.slice(0, 8)} · ${t("base revision")} ${selected.target_revision ?? "—"}`
-                            : ` · ${t("new note")}`}
-                        </p>
-                        {selected.target_note_id ? (
-                          selectedTarget ? (
-                            <div style={{ display: "grid", gap: ".6rem" }}>
-                              <div>
-                                <h3 className="svod-h3">{t("Current accepted (full)")}</h3>
-                                <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af" }}>
-                                  {selectedTarget.title} · {t("rev")} {selectedTarget.revision}
-                                </p>
-                                <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid #2a2e35", borderRadius: 6, padding: ".6rem .8rem" }}>
-                                  <SvodMarkdown body={selectedTarget.body} />
-                                </div>
-                                <details style={{ marginTop: ".4rem" }}>
-                                  <summary className="mono" style={{ fontSize: ".6875rem", cursor: "pointer" }}>
-                                    {t("Show exact source")}
-                                  </summary>
-                                  <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{`${selectedTarget.title}\n\n${selectedTarget.body}`}</pre>
-                                </details>
-                              </div>
-                              <div>
-                                <h3 className="svod-h3">{t("Proposed (full)")}</h3>
-                                <div style={{ maxHeight: 320, overflow: "auto", border: "1px dashed #4b5563", borderRadius: 6, padding: ".6rem .8rem" }}>
-                                  <SvodMarkdown body={selected.body} />
-                                </div>
-                                <details style={{ marginTop: ".4rem" }}>
-                                  <summary className="mono" style={{ fontSize: ".6875rem", cursor: "pointer" }}>
-                                    {t("Show exact proposal")}
-                                  </summary>
-                                  <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{`${selected.title}\n\n${selected.body}`}</pre>
-                                </details>
-                              </div>
-                            </div>
-                          ) : (
-                            <p role="alert" className="mono" style={{ fontSize: ".75rem", color: "#f87171" }}>
-                              {t("The original note is no longer available in this base.")}
-                            </p>
-                          )
-                        ) : (
-                          <div>
-                            <h3 className="svod-h3">{t("Proposed new note (full)")}</h3>
-                            <div style={{ maxHeight: 320, overflow: "auto", border: "1px dashed #4b5563", borderRadius: 6, padding: ".6rem .8rem" }}>
-                              <SvodMarkdown body={selected.body} />
-                            </div>
-                          </div>
-                        )}
-                        <ProposalReviewForm
-                          key={selected.id}
-                          proposalId={selected.id}
-                          slug={brain.slug}
-                          initialTitle={selected.title}
-                          initialBody={selected.body}
-                          foldersByBrain={foldersByBrain}
-                          bases={reviewableBases.map((b) => ({ id: b.id, title: b.title }))}
-                          currentBrainId={brain.id}
-                          proposalRevision={selected.revision}
-                          targetRevision={selected.target_note_id ? (selectedTarget?.revision ?? selected.target_revision) : null}
-                          expectedSourceBrainId={selected.brain_id}
-                        />
-                        <div style={{ display: "flex", gap: ".4rem" }}>
-                          <form action={rejectNote}>
-                            <input type="hidden" name="id" value={selected.id} />
-                            <input type="hidden" name="slug" value={brain.slug} />
-                            <button className="svod-btn-ghost" type="submit">
-                              {t("Reject (keeps content)")}
-                            </button>
-                          </form>
-                        </div>
-                      </section>
-                    )}
-                    {selected.status === "active" && acceptedFrom && (
-                      <p className="mono" style={{ fontSize: ".6875rem", color: "#9aa3af", marginTop: ".75rem" }}>
-                        {acceptedFrom.target_note_id
-                          ? fill(t("Accepted from proposal <0/> (target <1/>)<2/>"), [
-                              acceptedFrom.id.slice(0, 8),
-                              acceptedFrom.target_note_id.slice(0, 8),
-                              acceptedFrom.brain_id !== selected.brain_id
-                                ? ` · ${t("moved from")} ${acceptedFrom.brain_title ?? acceptedFrom.brain_id.slice(0, 8)}`
-                                : "",
-                            ])
-                          : fill(t("Accepted from proposal <0/>"), [acceptedFrom.id.slice(0, 8)])}
-                        {acceptedFrom.token_prefix ? ` · ${t("via token")} ${acceptedFrom.token_prefix}…` : ""}
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-            </article>
-          ) : (
-            <div className="svod-empty">
-              <p style={{ margin: "0 0 .5rem" }}>{t("Select a note on the left, or search above.")}</p>
-              <p className="mono" style={{ fontSize: ".75rem", color: "#6b7280", margin: 0 }}>
-                {t("A link by stable note ID keeps working after the note moves between folders.")}
-              </p>
-              {canEdit && (
-                <div style={{ marginTop: "1rem", display: "grid", gap: "1rem" }}>
-                  <SvodEditor
-                    brainId={brain.id}
-                    slug={brain.slug}
-                    folderId={validFolderFocus}
-                    folders={folderOptions}
-                    initialTitle=""
-                    initialBody=""
-                    mode="create"
-                  />
-                  <section aria-label={t("Upload Markdown")}>
-                    <h3 className="svod-h3">{t("Upload .md")}</h3>
-                    <SvodUpload brainId={brain.id} slug={brain.slug} folders={folderOptions} currentFolder={validFolderFocus} />
-                  </section>
-                </div>
+              </details>
+            )}
+          </nav>
+        )}
+
+        {view !== "manage" && (
+          <p className="svod-ws-indexline" data-error={indexHasError ? "true" : undefined}>
+            <span>
+              {t("Index")}: {indexStatus.pendingNotes} {t("notes")} ·{" "}
+              {indexStatus.pendingChunks} {t("chunks")} · {indexStatus.errorChunks}{" "}
+              {t("errors")}
+            </span>
+            <Link href={`${baseHref}?view=manage`}>{t("Details")}</Link>
+          </p>
+        )}
+
+        <div className="svod-ws-foot">
+          {canReview && (
+            <Link
+              href={`${baseHref}?view=review`}
+              className="svod-ws-footlink"
+              data-active={view === "review" ? "true" : undefined}
+            >
+              {t("Proposals")} <span className="svod-ws-count">{pendingCountRow}</span>
+            </Link>
+          )}
+          <Link
+            href={`${baseHref}?view=manage`}
+            className="svod-ws-footlink"
+            data-active={view === "manage" ? "true" : undefined}
+          >
+            {t("Base management")}
+          </Link>
+          <Link href="/settings/tokens" className="svod-ws-footlink">
+            {t("Agents and access")}
+          </Link>
+          <Link href="/settings" className="svod-ws-footlink">
+            {t("Settings")}
+          </Link>
+        </div>
+      </aside>
+
+      <main id="svod-main" className="svod-ws-main" tabIndex={-1}>
+        <header className="svod-ws-crumbs">
+          <span className="svod-ws-path">{crumbs}</span>
+          {view === "notes" && selected && (
+            <div className="svod-ws-tabs" aria-label={t("Note mode")}>
+              <Link
+                href={noteLink(selected.id)}
+                className="svod-ws-tab"
+                aria-pressed={!editing ? "true" : "false"}
+                data-active={!editing ? "true" : undefined}
+              >
+                {t("Reading")}
+              </Link>
+              {canEdit && selected.status === "active" && (
+                <Link
+                  href={`${noteLink(selected.id)}&edit=1`}
+                  className="svod-ws-tab"
+                  aria-pressed={editing ? "true" : "false"}
+                  data-active={editing ? "true" : undefined}
+                >
+                  {t("Editor")}
+                </Link>
               )}
             </div>
           )}
+        </header>
 
-          {canEdit && selected && !editing && (
-            <section style={{ marginTop: "2rem" }} aria-label={t("Upload Markdown")}>
-              <h3 className="svod-h3">{t("Upload .md")}</h3>
-              <SvodUpload brainId={brain.id} slug={brain.slug} folders={folderOptions} currentFolder={selected.folder_id} />
-            </section>
-          )}
+        {view === "manage" ? (
+          <section className="svod-ws-manage" aria-label={t("Base management")}>
+            <div>
+              <h1 style={{ fontSize: "1.375rem", margin: 0, fontWeight: 650 }}>{t("Base management")}</h1>
+              <p className="svod-ws-meta">
+                {brain.title} · <span className="svod-ws-techid">{brain.id.slice(0, 8)}</span> · {access.role ?? ""}
+              </p>
+            </div>
 
-          {legacySources.length > 0 && (
-            <section style={{ marginTop: "2rem" }} aria-label={t("Legacy attachments (read-only)")}>
-              <h3 className="svod-h3">{t("Legacy attachments (read-only)")}</h3>
-              <ul style={{ margin: ".4rem 0 0", paddingLeft: "1.1rem", color: "#9aa3af", fontSize: ".8125rem" }}>
-                {legacySources.map((s) =>
-                  s.storage_key ? (
-                    <li key={s.id}>
-                      <a href={`/api/storage/${s.storage_key}`} style={{ color: "#9aa3af" }}>
-                        {s.original_name ?? s.id.slice(0, 8)}
-                      </a>
-                    </li>
+            <div className="svod-ws-card">
+              <h2>{t("Search index")}</h2>
+              {canEdit && (
+                <div style={{ display: "flex", gap: ".6rem", flexWrap: "wrap", alignItems: "center" }}>
+                  <SvodIndexRefreshForm brainId={brain.id} />
+                  <SvodAutoIndexForm brainId={brain.id} initial={indexStatus.autoIndex} />
+                </div>
+              )}
+              <div>
+                <div className="svod-ws-row">
+                  <span>{t("Notes awaiting index")}</span>
+                  <span>{indexStatus.pendingNotes}</span>
+                </div>
+                <div className="svod-ws-row">
+                  <span>{t("Chunks in progress")}</span>
+                  <span>{indexStatus.pendingChunks}</span>
+                </div>
+                <div className="svod-ws-row">
+                  <span>{t("Index errors")}</span>
+                  <span>{indexStatus.errorChunks}</span>
+                </div>
+                <div className="svod-ws-row">
+                  <span>{t("Automatic indexing")}</span>
+                  <span>{indexStatus.autoIndex ? t("On") : t("Off")}</span>
+                </div>
+                <div className="svod-ws-row">
+                  <span>{t("Embedding model")}</span>
+                  <span>{embedReady ? t("Ready") : (embedNote ?? t("Loading"))}</span>
+                </div>
+              </div>
+              {indexStatus.lastError ? (
+                <p role="alert" className="svod-ws-error" style={{ margin: 0 }}>
+                  {t("Last index error")}: {indexStatus.lastError.slice(0, 300)}
+                </p>
+              ) : null}
+              {!embedReady && embedNote ? (
+                <p className="svod-ws-error" style={{ margin: 0 }}>
+                  {t("Semantic search unavailable")}: {embedNote.slice(0, 200)}
+                </p>
+              ) : null}
+            </div>
+
+            {canEdit && (
+              <div className="svod-ws-card">
+                <h2>{t("Import")}</h2>
+                <SvodImportForm brainId={brain.id} />
+              </div>
+            )}
+
+            {canEdit && (
+              <div className="svod-ws-card">
+                <h2>{t("Upload a Markdown note")}</h2>
+                <SvodUpload brainId={brain.id} slug={brain.slug} folders={folderOptions} currentFolder={validFolderFocus} />
+              </div>
+            )}
+
+            <div className="svod-ws-card">
+              <h2>{t("Export")}</h2>
+              <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+                <a className="svod-ws-btn" href={`/api/brains/${brain.id}/svod-export?format=full`}>
+                  {t("Export full archive")}
+                </a>
+                <a className="svod-ws-btn" href={`/api/brains/${brain.id}/svod-export?format=markdown`}>
+                  {t("Export Markdown")}
+                </a>
+              </div>
+            </div>
+
+            <div className="svod-ws-card">
+              <h2>{t("Details")}</h2>
+              <div className="svod-ws-row">
+                <span>{t("Active notes")}</span>
+                <span>{activeNotes.length}</span>
+              </div>
+              {canReview && (
+                <div className="svod-ws-row">
+                  <span>{t("Pending review")}</span>
+                  <span>{pendingCountRow}</span>
+                </div>
+              )}
+              {legacySources.length > 0 ? (
+                <div>
+                  <p style={{ margin: ".4rem 0" }}>{t("Legacy attachments (read-only)")}</p>
+                  <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "#a1aabc", fontSize: ".8125rem" }}>
+                    {legacySources.map((s) =>
+                      s.storage_key ? (
+                        <li key={s.id}>
+                          <a href={`/api/storage/${s.storage_key}`} style={{ color: "#a1aabc" }}>
+                            {s.original_name ?? s.id.slice(0, 8)}
+                          </a>
+                        </li>
+                      ) : (
+                        <li key={s.id}>{s.original_name ?? s.id.slice(0, 8)}</li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: "#a1aabc", fontSize: ".875rem" }}>
+                  {t("No legacy attachments.")}
+                </p>
+              )}
+              {access.canAdmin && (
+                <Link className="svod-ws-btn" href={`/brains/${brain.id}/share`}>
+                  {t("Members and sharing (owner)")}
+                </Link>
+              )}
+            </div>
+          </section>
+        ) : view === "review" ? (
+          <section className="svod-ws-review" aria-label={t("Proposal review")}>
+            {selected && selected.status === "pending" ? (
+              <article style={{ display: "grid", gap: "1rem" }}>
+                <div>
+                  <p className="svod-ws-meta" style={{ marginBottom: ".25rem" }}>
+                    {t("Proposals")} / {selected.title}
+                  </p>
+                  <h1 style={{ fontSize: "1.375rem", margin: 0, fontWeight: 650 }}>{selected.title}</h1>
+                  <p className="svod-ws-meta" style={{ margin: ".3rem 0 0" }}>
+                    {selectedProposalMeta?.token_prefix
+                      ? `${t("via token")} ${selectedProposalMeta.token_prefix}…`
+                      : t("via web")}
+                    {` · ${t("rev")} ${selected.revision}`}
+                    {selected.target_note_id
+                      ? ` · target ${selected.target_note_id.slice(0, 8)} · ${t("base revision")} ${selected.target_revision ?? "—"}`
+                      : ` · ${t("new note")}`}
+                  </p>
+                </div>
+                {selected.target_note_id ? (
+                  selectedTarget ? (
+                    <div className="svod-ws-diff">
+                      <div className="svod-ws-pane" data-kind="current">
+                        <div className="svod-ws-sectitle"><span>{t("Current version")}</span></div>
+                        <p className="svod-ws-meta">
+                          {selectedTarget.title} · {t("rev")} {selectedTarget.revision}
+                        </p>
+                        <SvodMarkdown body={selectedTarget.body} />
+                        <details style={{ marginTop: ".5rem" }}>
+                          <summary style={{ fontSize: ".8125rem", cursor: "pointer" }}>
+                            {t("Show exact source")}
+                          </summary>
+                          <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem", fontFamily: "ui-monospace, Menlo, monospace" }}>{`${selectedTarget.title}\n\n${selectedTarget.body}`}</pre>
+                        </details>
+                      </div>
+                      <div className="svod-ws-pane" data-kind="proposed">
+                        <div className="svod-ws-sectitle"><span>{t("Proposed version")}</span></div>
+                        <SvodMarkdown body={selected.body} />
+                        <details style={{ marginTop: ".5rem" }}>
+                          <summary style={{ fontSize: ".8125rem", cursor: "pointer" }}>
+                            {t("Show exact proposal")}
+                          </summary>
+                          <pre style={{ whiteSpace: "pre-wrap", fontSize: ".75rem", fontFamily: "ui-monospace, Menlo, monospace" }}>{`${selected.title}\n\n${selected.body}`}</pre>
+                        </details>
+                      </div>
+                    </div>
                   ) : (
-                    <li key={s.id}>{s.original_name ?? s.id.slice(0, 8)}</li>
-                  ),
+                    <p role="alert" className="svod-ws-error">
+                      {t("The original note is no longer available in this base.")}
+                    </p>
+                  )
+                ) : (
+                  <div className="svod-ws-pane" data-kind="proposed">
+                    <div className="svod-ws-sectitle"><span>{t("Proposed new note")}</span></div>
+                    <SvodMarkdown body={selected.body} />
+                  </div>
                 )}
-              </ul>
-            </section>
-          )}
-        </main>
-      </div>
+                <ProposalReviewForm
+                  key={selected.id}
+                  proposalId={selected.id}
+                  slug={brain.slug}
+                  initialTitle={selected.title}
+                  initialBody={selected.body}
+                  foldersByBrain={foldersByBrain}
+                  bases={reviewableBases.map((b) => ({ id: b.id, title: b.title }))}
+                  currentBrainId={brain.id}
+                  proposalRevision={selected.revision}
+                  targetRevision={selected.target_note_id ? (selectedTarget?.revision ?? selected.target_revision) : null}
+                  expectedSourceBrainId={selected.brain_id}
+                />
+                <div style={{ display: "flex", gap: ".4rem" }}>
+                  <form action={rejectNote}>
+                    <input type="hidden" name="id" value={selected.id} />
+                    <input type="hidden" name="slug" value={brain.slug} />
+                    <button className="svod-ws-btn" type="submit">
+                      {t("Reject (keeps content)")}
+                    </button>
+                  </form>
+                </div>
+              </article>
+            ) : (
+              <div style={{ maxWidth: "40rem" }}>
+                <h1 style={{ fontSize: "1.375rem", fontWeight: 650 }}>{t("Proposals")}</h1>
+                <p style={{ color: "#a1aabc" }}>
+                  {pendingCountRow === 0
+                    ? t("Nothing awaiting review.")
+                    : t("Select a proposal in the sidebar to compare versions.")}
+                </p>
+              </div>
+            )}
+          </section>
+        ) : showEditor ? (
+          creating ? (
+            <SvodEditor
+              key={`new-${validFolderFocus ?? "root"}`}
+              brainId={brain.id}
+              slug={brain.slug}
+              baseHref={baseHref}
+              folderId={validFolderFocus}
+              folders={folderOptions}
+              initialTitle=""
+              initialBody=""
+              folderLabel={focusPath || t("Base root")}
+              mode="create"
+            />
+          ) : (
+            selected && (
+              <SvodEditor
+                key={selected.id}
+                brainId={brain.id}
+                slug={brain.slug}
+                baseHref={baseHref}
+                noteId={selected.id}
+                folderId={selected.folder_id}
+                folders={folderOptions}
+                initialTitle={selected.title}
+                initialBody={selected.body}
+                folderLabel={selectedPath || t("Base root")}
+                mode="edit"
+              />
+            )
+          )
+        ) : selected ? (
+          <article className="svod-ws-read">
+            <p className="svod-ws-meta" style={{ marginBottom: ".4rem" }}>
+              {selectedPath || t("Base root")} ·{" "}
+              <span className="svod-ws-techid">{selected.id.slice(0, 8)}</span>
+              {selected.status === "pending" ? ` · ${t("awaiting review — not searchable")}` : ""}
+            </p>
+            <h1>{selected.title}</h1>
+            <SvodMarkdown body={selected.body} />
+            <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap", marginTop: "1.4rem", alignItems: "center" }}>
+              {canEdit && selected.status === "active" && (
+                <Link className="svod-ws-btn svod-ws-btn-primary" href={`${noteLink(selected.id)}&edit=1`}>
+                  {t("Edit")}
+                </Link>
+              )}
+              {selected.status === "active" && (
+                <SvodNoteMenu
+                  brainId={brain.id}
+                  slug={brain.slug}
+                  baseHref={baseHref}
+                  noteId={selected.id}
+                  currentFolder={selected.folder_id}
+                  folders={moveFolders}
+                  canEdit={canEdit}
+                />
+              )}
+            </div>
+            {selected.status === "active" && acceptedFrom && (
+              <p style={{ fontSize: ".8125rem", color: "#a1aabc", marginTop: "1rem" }}>
+                {acceptedFrom.target_note_id
+                  ? fill(t("Accepted from proposal <0/> (target <1/>)<2/>"), [
+                      acceptedFrom.id.slice(0, 8),
+                      acceptedFrom.target_note_id.slice(0, 8),
+                      acceptedFrom.brain_id !== selected.brain_id
+                        ? ` · ${t("moved from")} ${acceptedFrom.brain_title ?? acceptedFrom.brain_id.slice(0, 8)}`
+                        : "",
+                    ])
+                  : fill(t("Accepted from proposal <0/>"), [acceptedFrom.id.slice(0, 8)])}
+                {acceptedFrom.token_prefix ? ` · ${t("via token")} ${acceptedFrom.token_prefix}…` : ""}
+              </p>
+            )}
+          </article>
+        ) : (
+          <div className="svod-ws-read">
+            <h1 style={{ fontSize: "1.375rem" }}>{t("Notes")}</h1>
+            <p style={{ color: "#a1aabc" }}>{t("Select a note on the left, or search above.")}</p>
+            <p style={{ fontSize: ".8125rem", color: "#a1aabc" }}>
+              {t("A link by stable note ID keeps working after the note moves between folders.")}
+            </p>
+            {canEdit && (
+              <div style={{ marginTop: "1rem", display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+                <Link className="svod-ws-btn svod-ws-btn-primary" href={`${baseHref}?new=1${validFolderFocus ? `&folder=${validFolderFocus}` : ""}`}>
+                  {t("New note")}
+                </Link>
+                <Link className="svod-ws-btn" href={`${baseHref}?view=manage`}>
+                  {t("Import or upload")}
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
@@ -798,41 +928,40 @@ function TreeNodes({
         const open = expanded.has(n.folder.id);
         const notes = notesByFolder.get(n.folder.id) ?? [];
         return (
-          <details key={n.folder.id} open={open} className="svod-folder">
-            <summary className="svod-folder-sum">
+          <details key={n.folder.id} open={open} className="svod-ws-folder">
+            <summary>
               <Link
                 href={`${baseHref}?folder=${n.folder.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-                className="svod-folder-link"
+                className="svod-ws-folder-link"
                 aria-label={`${n.folder.name}`}
               >
                 {n.folder.name}
               </Link>
-              <span className="svod-count">{notes.length + n.children.length}</span>
+              <span className="svod-ws-count">{notes.length + n.children.length}</span>
             </summary>
-            <div className="svod-folder-body">
+            <div className="svod-ws-folder-body">
               {canEdit && (
-                <div style={{ marginBottom: ".35rem" }}>
+                <details className="svod-ws-folder-actions">
+                  <summary aria-label={t("Folder actions")}>
+                    {t("Actions")}
+                  </summary>
                   <SvodFolderRenameForm
                     brainId={n.folder.brain_id}
                     folderId={n.folder.id}
                     currentName={n.folder.name}
                   />
-                </div>
+                </details>
               )}
               {notes.map((note) => (
-                <div
+                <Link
                   key={note.id}
-                  className="svod-note-row"
+                  href={link(note.id)}
+                  aria-current={selectedId === note.id ? "page" : undefined}
+                  className="svod-ws-note"
                   data-active={selectedId === note.id ? "true" : undefined}
                 >
-                  <Link
-                    href={link(note.id)}
-                    aria-current={selectedId === note.id ? "page" : undefined}
-                    className="svod-note-link"
-                  >
-                    {note.title}
-                  </Link>
-                </div>
+                  {note.title}
+                </Link>
               ))}
               <TreeNodes
                 nodes={n.children}

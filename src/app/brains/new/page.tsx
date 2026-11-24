@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata() {
   const t = await translator();
-  return { title: t("New brain — svod") };
+  return { title: t("New base — svod") };
 }
 
 export default async function NewBrainPage() {
@@ -21,7 +21,7 @@ export default async function NewBrainPage() {
   const parents = await possibleParents(user.id);
 
   return (
-    <AppShell active="/brains/new" eyebrow={t("One job per brain")} title={t("New brain")} narrow>
+    <AppShell active="/brains/new" eyebrow={t("Knowledge base")} title={t("New base")} narrow>
       <NewBrainForm parents={parents.map((p) => ({ id: p.id, title: p.title }))} />
     </AppShell>
   );

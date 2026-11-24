@@ -8,14 +8,12 @@ import type { Brain } from "@/db/types";
 import { currentUser } from "@/lib/session";
 import { slugify } from "@/lib/brains";
 import { captureServer } from "@/lib/analytics";
-import { TOPIC_KEYS } from "@/lib/topics";
 import { brainAccessById } from "@/lib/svod-access";
 
 const createSchema = z.object({
   title: z.string().trim().min(1, "Give the base a name").max(80),
   goal: z.string().trim().max(4000).optional(),
   docs: z.string().trim().max(2000).optional(),
-  topic: z.string().catch("other").transform((t) => (TOPIC_KEYS.includes(t) ? t : "other")),
   parent: z.string().trim().optional(),
 });
 
@@ -27,7 +25,6 @@ export async function createBrain(_prev: unknown, formData: FormData) {
     title: formData.get("title"),
     goal: formData.get("goal") || undefined,
     docs: undefined,
-    topic: formData.get("topic") ?? "other",
     parent: String(formData.get("parent") ?? "") || undefined,
   });
   if (!parsed.success) {
@@ -64,13 +61,12 @@ export async function createBrain(_prev: unknown, formData: FormData) {
 
   const brain = await one<Brain>(
     `insert into brains (owner_id, slug, title, goal, topic, parent_id, visibility, price_cents, kind)
-     values ($1, $2, $3, $4, $5, $6, 'private', 0, 'knowledge') returning *`,
+     values ($1, $2, $3, $4, 'other', $5, 'private', 0, 'knowledge') returning *`,
     [
       user.id,
       slug,
       parsed.data.title,
       parsed.data.goal ?? null,
-      parsed.data.topic,
       parentId,
     ],
   );

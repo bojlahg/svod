@@ -1,17 +1,9 @@
 "use client";
 
 import { useT } from "@/lib/t-client";
-import { msg } from "@/lib/msg";
 import { useActionState } from "react";
 import Link from "next/link";
 import { createBrain } from "../actions";
-import { TOPICS } from "@/lib/topics";
-
-const EXAMPLES = [
-  msg("Match our design system exactly: colour, type scale, spacing, component rules, empty and error states."),
-  msg("Answer questions about the Stripe webhook flow we actually run — our retries and idempotency, not the docs version."),
-  msg("Follow our Postgres conventions: naming, migrations, indexing, and the things we never do."),
-];
 
 export default function NewBrainForm({
   parents,
@@ -39,19 +31,6 @@ export default function NewBrainForm({
           />
         </Field>
 
-        <Field
-          label={t("Field")}
-          hint={t("A label for what this base is about.")}
-        >
-          <select name="topic" defaultValue="web" style={inputStyle}>
-            {TOPICS.map((field) => (
-              <option key={field.key} value={field.key}>
-                {t(field.label)}
-              </option>
-            ))}
-          </select>
-        </Field>
-
         {parents.length > 0 && (
           <Field
             label={t("Group it under")}
@@ -69,39 +48,21 @@ export default function NewBrainForm({
         )}
 
         <Field
-          label={t("What should it be able to do? (optional)")}
-          hint={t("A short note about what this base holds. Exams are not part of the Markdown workspace.")}
+          label={t("Description (optional)")}
+          hint={t("A short note about what this base holds.")}
         >
           <textarea
             name="goal"
             rows={4}
-            placeholder={t(EXAMPLES[0])}
+            maxLength={4000}
+            placeholder={t("What this base is for.")}
             style={inputStyle}
           />
         </Field>
 
-        <div>
-          <p className="eyebrow" style={{ marginBottom: ".5rem" }}>
-            {t("Examples")}</p>
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: "1.1rem",
-              color: "var(--ink-2)",
-              fontSize: ".9375rem",
-              display: "grid",
-              gap: ".35rem",
-            }}
-          >
-            {EXAMPLES.map((e) => (
-              <li key={e}>{t(e)}</li>
-            ))}
-          </ul>
-        </div>
-
         {state?.error && (
           <p
-            className="mono"
+            className="ui-text"
             style={{ color: "var(--color-riso-red)", fontSize: ".8125rem", margin: 0 }}
           >
             {state.error}
@@ -110,7 +71,7 @@ export default function NewBrainForm({
 
         <div style={{ display: "flex", gap: ".75rem" }}>
           <button className="btn" type="submit" disabled={pending}>
-            {pending ? t("Creating…") : t("Create brain")}
+            {pending ? t("Creating…") : t("Create base")}
           </button>
           <Link className="btn btn-ghost" href="/brains">
             {t("Cancel")}</Link>
@@ -142,7 +103,7 @@ function Field({
   return (
     <label style={{ display: "grid", gap: ".4rem" }}>
       <span style={{ fontWeight: 600 }}>{label}</span>
-      <span className="mono" style={{ fontSize: ".75rem", color: "var(--ink-2)" }}>
+      <span className="ui-text" style={{ fontSize: ".875rem", color: "var(--ink-2)" }}>
         {hint}
       </span>
       {children}

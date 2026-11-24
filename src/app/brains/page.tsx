@@ -47,14 +47,14 @@ export default async function BrainsPage() {
     >
       <div className="stack">
         <p className="lede">
-          {t("Every base you own or were granted access to. A base is addressed by its ID or by owner handle + slug — slugs alone are not unique across owners.")}
+          {t("Your bases and bases shared with you.")}
         </p>
         <div className="grid-brains">
           {bases.map((b) => {
             return (
               <Link key={b.id} href={`/brains/${b.id}`} className="card" data-tint={tintFor(b)}>
                 <span className="eyebrow" style={{ color: "inherit", opacity: 0.75 }}>
-                  {b.owner_handle ?? ""} · {b.member_role} · {fill(t("<0/> notes"), [b.note_count])}
+                  {b.owner_handle ?? ""} · {t(b.member_role === "owner" ? "Owner" : b.member_role === "reviewer" ? "Reviewer" : b.member_role === "editor" ? "Editor" : "Reader")} · {fill(t("<0/> notes"), [b.note_count])}
                 </span>
                 <h2 className="card-title">{b.title}</h2>
                 <p className="card-goal">{b.goal ?? t("Markdown notes in folders.")}</p>
@@ -71,7 +71,7 @@ export default async function BrainsPage() {
           })}
           <Link href="/brains/new" className="card-new">
             <span className="plus">+</span>
-            <span className="mono" style={{ fontSize: ".8125rem" }}>{t("New base")}</span>
+            <span style={{ fontSize: ".875rem" }}>{t("New base")}</span>
           </Link>
         </div>
       </div>

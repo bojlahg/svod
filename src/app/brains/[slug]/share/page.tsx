@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { translator } from "@/lib/t";
 import { markup } from "@/lib/markup";
 import AppShell from "@/components/AppShell";
+import { SvodBaseRenameForm } from "../svod-forms";
 import DeleteBrain from "./DeleteBrain";
 import RemoveMember from "./RemoveMember";
 import { query } from "@/db";
@@ -56,6 +57,12 @@ export default async function SharePage({
           <Link href="/admin/users" style={{ textDecoration: "underline" }} key="s0" />,
         ])}
       </p>
+
+      <SvodBaseRenameForm
+        brainId={brain.id}
+        initialTitle={brain.title}
+        initialGoal={brain.goal ?? ""}
+      />
 
       <section style={{ marginTop: "1.75rem" }}>
         <h2 className="h2" style={{ marginBottom: ".5rem" }}>{t("Members")}</h2>

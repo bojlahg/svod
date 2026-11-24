@@ -53,12 +53,30 @@ function revalidateBrain(brainId: string, slug: string) {
   revalidatePath("/brains");
 }
 
+function validateBaseGoal(raw: unknown): { ok: true; goal: string | null } | { ok: false; error: string } {
+  const goal = String(raw ?? "").trim();
+  if (goal.length > 4000) return { ok: false, error: "Description is too long (max 4000)." };
+  return { ok: true, goal: goal || null };
+}
+
 export async function renameBase(formData: FormData) {
   const found = await editableBrain(formData);
   if (!found) return { error: "Base not found." };
   const v = validateBaseTitle(formData.get("title"));
   if (!v.ok) return { error: v.error };
-  await query(`update brains set title = $2 where id = $1`, [found.brain.id, v.title]);
+  // Absent field keeps the stored description. The editor always sends it.
+  const goalRaw = formData.get("goal");
+  if (goalRaw === null) {
+    await query(`update brains set title = $2 where id = $1`, [found.brain.id, v.title]);
+  } else {
+    const goal = validateBaseGoal(goalRaw);
+    if (!goal.ok) return { error: goal.error };
+    await query(`update brains set title = $2, goal = $3 where id = $1`, [
+      found.brain.id,
+      v.title,
+      goal.goal,
+    ]);
+  }
   revalidateBrain(found.brain.id, found.brain.slug);
   return { ok: true as const };
 }
